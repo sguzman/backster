@@ -4,6 +4,61 @@ use chrono::{DateTime, TimeZone, Utc};
 use crate::backtest::Bar;
 use crate::wolfram::{WolframSession, WolframSessionConfig};
 
+fn unescape_wolfram_stringish(s: &str) -> String {
+    // When Wolfram returns a string through certain WSTP paths, it can come back
+    // in an InputForm-like escaped representation (e.g. `\012` for LF, `\"` for `"`).
+    // Decode the subset we observe so the payload becomes valid JSON again.
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(ch) = it.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+
+        let Some(n) = it.peek().copied() else {
+            out.push('\\');
+            break;
+        };
+
+        match n {
+            '"' => {
+                it.next();
+                out.push('"');
+            }
+            '\\' => {
+                it.next();
+                out.push('\\');
+            }
+            '0'..='7' => {
+                let mut oct = String::new();
+                for _ in 0..3 {
+                    if let Some(d) = it.peek().copied() {
+                        if matches!(d, '0'..='7') {
+                            oct.push(d);
+                            it.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if let Ok(v) = u32::from_str_radix(&oct, 8) {
+                    if let Some(c) = char::from_u32(v) {
+                        out.push(c);
+                    }
+                }
+            }
+            _ => {
+                // Leave unknown escapes as-is.
+                out.push('\\');
+                out.push(n);
+                it.next();
+            }
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct RollingFitRow {
     pub ts: DateTime<Utc>,
@@ -86,6 +141,7 @@ pub fn fetch_close_bars_with_rolling_fit(
         window
     );
     let json = sess.eval_to_string_expr(&wl)?;
+    let json = unescape_wolfram_stringish(&json);
 
     #[derive(serde::Deserialize)]
     struct Payload {
@@ -93,8 +149,10 @@ pub fn fetch_close_bars_with_rolling_fit(
         fit: Vec<Vec<Option<f64>>>,
     }
 
-    let payload: Payload =
-        serde_json::from_str(&json).context("Failed to parse JSON payload from Wolfram")?;
+    let payload: Payload = serde_json::from_str(&json).with_context(|| {
+        let prefix: String = json.chars().take(200).collect();
+        format!("Failed to parse JSON payload from Wolfram (prefix={prefix:?})")
+    })?;
 
     anyhow::ensure!(!payload.close.is_empty(), "Wolfram returned no close rows");
 
@@ -168,6 +226,7 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         window
     );
     let json = sess.eval_to_string_expr(&wl)?;
+    let json = unescape_wolfram_stringish(&json);
 
     #[derive(serde::Deserialize)]
     struct Payload {
@@ -175,8 +234,10 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         fit: Vec<Vec<Option<f64>>>,
     }
 
-    let payload: Payload =
-        serde_json::from_str(&json).context("Failed to parse JSON payload from Wolfram")?;
+    let payload: Payload = serde_json::from_str(&json).with_context(|| {
+        let prefix: String = json.chars().take(200).collect();
+        format!("Failed to parse JSON payload from Wolfram (prefix={prefix:?})")
+    })?;
 
     anyhow::ensure!(!payload.close.is_empty(), "Wolfram returned no close rows");
 

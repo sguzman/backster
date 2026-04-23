@@ -1,0 +1,16 @@
+mode = "backtest"
+
+[data]
+source = "wolfram_expr"
+expr = "TimeSeries[Table[{DatePlus[DateObject[{2020, 1, 1}], i], 100.0 + 0.1 i + Sin[i/3.0]}, {i, 0, 40}]]"
+
+[backtest]
+starting_cash = 100000.0
+window = 10
+
+[backtest.strategy]
+kind = "rolling_pvalue_predictor"
+enter_threshold = 0.001
+exit_threshold = 0.0
+normalize_weights = true
+min_total_weight = 0.0

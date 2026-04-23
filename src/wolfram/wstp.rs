@@ -1,4 +1,5 @@
 use std::ffi::{c_char, c_int, c_uchar, c_void, CStr, CString};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -12,6 +13,7 @@ unsafe extern "C" {
     fn WSDeinitialize(env: WSENV);
 
     fn WSOpenString(env: WSENV, command_line: *const c_char, error: *mut c_int) -> WSLINK;
+    fn WSActivate(link: WSLINK) -> c_int;
     fn WSClose(link: WSLINK);
 
     fn WSError(link: WSLINK) -> c_int;
@@ -25,6 +27,7 @@ unsafe extern "C" {
 
     fn WSPutFunction(link: WSLINK, f: *const c_char, arg_count: c_int) -> c_int;
     fn WSPutString(link: WSLINK, s: *const c_char) -> c_int;
+    fn WSPutSymbol(link: WSLINK, s: *const c_char) -> c_int;
 
     fn WSGetString(link: WSLINK, s: *mut *const c_char) -> c_int;
     fn WSReleaseString(link: WSLINK, s: *const c_char) -> c_int;
@@ -52,6 +55,8 @@ pub struct WolframSession {
 }
 
 impl WolframSession {
+    const DEFAULT_EVAL_TIMEOUT: Duration = Duration::from_secs(90);
+
     pub fn connect(config: WolframSessionConfig) -> Result<Self> {
         let env = unsafe { WSInitialize(std::ptr::null_mut()) };
         anyhow::ensure!(!env.is_null(), "WSInitialize failed (env is null)");
@@ -66,6 +71,14 @@ impl WolframSession {
             let msg = unsafe { error_message(env, error) };
             unsafe { WSDeinitialize(env) };
             anyhow::bail!("WSOpenString failed (error={error}): {msg}");
+        }
+        let ok = unsafe { WSActivate(link) };
+        if ok == 0 {
+            let err = unsafe { WSError(link) };
+            let msg = unsafe { error_message(env, err) };
+            unsafe { WSClose(link) };
+            unsafe { WSDeinitialize(env) };
+            anyhow::bail!("WSActivate failed: WSError={err} ({msg})");
         }
 
         let mut session = Self { env, link };
@@ -82,10 +95,11 @@ impl WolframSession {
         self.put_function("ToString", 2)?;
         self.put_function("ToExpression", 1)?;
         self.put_string(code_c.as_c_str())?;
+        self.put_symbol("InputForm")?;
         self.end_packet()?;
         self.flush()?;
 
-        self.read_return_string()
+        self.read_return_string_with_timeout(Self::DEFAULT_EVAL_TIMEOUT)
             .with_context(|| format!("Failed evaluating WSTP code: {code}"))
     }
 
@@ -103,7 +117,7 @@ impl WolframSession {
         self.end_packet()?;
         self.flush()?;
 
-        self.read_return_string()
+        self.read_return_string_with_timeout(Self::DEFAULT_EVAL_TIMEOUT)
             .with_context(|| format!("Failed evaluating WSTP expr: {expr}"))
     }
 
@@ -120,6 +134,13 @@ impl WolframSession {
         Ok(())
     }
 
+    fn put_symbol(&mut self, s: &str) -> Result<()> {
+        let c = CString::new(s).context("Symbol contains NUL byte")?;
+        let ok = unsafe { WSPutSymbol(self.link, c.as_ptr()) };
+        anyhow::ensure!(ok != 0, "WSPutSymbol failed: {s}");
+        Ok(())
+    }
+
     fn end_packet(&mut self) -> Result<()> {
         let ok = unsafe { WSEndPacket(self.link) };
         anyhow::ensure!(ok != 0, "WSEndPacket failed");
@@ -132,24 +153,48 @@ impl WolframSession {
         Ok(())
     }
 
-    fn read_return_string(&mut self) -> Result<String> {
+    fn read_return_string_with_timeout(&mut self, timeout: Duration) -> Result<String> {
+        let deadline = Instant::now() + timeout;
+
         loop {
-            let pkt = unsafe { WSNextPacket(self.link) };
-            if pkt == 0 {
-                self.fail_with_ws_error("WSNextPacket returned 0")?;
-            }
+            let Some(pkt) = self.next_packet_until(deadline)? else {
+                anyhow::bail!(
+                    "Timed out waiting for Wolfram RETURNPKT after {:?}",
+                    timeout
+                );
+            };
+
             if pkt == RETURNPKT {
                 let mut out: *const c_char = std::ptr::null();
                 let ok = unsafe { WSGetString(self.link, &mut out as *mut *const c_char) };
                 anyhow::ensure!(ok != 0, "WSGetString failed");
-                let s = unsafe { CStr::from_ptr(out) }
-                    .to_string_lossy()
-                    .to_string();
+                let s = unsafe { CStr::from_ptr(out) }.to_string_lossy().to_string();
                 unsafe { WSReleaseString(self.link, out) };
                 unsafe { WSNewPacket(self.link) };
                 return Ok(s);
             }
+
             unsafe { WSNewPacket(self.link) };
+        }
+    }
+
+    fn next_packet_until(&mut self, deadline: Instant) -> Result<Option<c_int>> {
+        loop {
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+
+            let ready = unsafe { WSReady(self.link) };
+            if ready == 0 {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+
+            let pkt = unsafe { WSNextPacket(self.link) };
+            if pkt == 0 {
+                self.fail_with_ws_error("WSNextPacket returned 0")?;
+            }
+            return Ok(Some(pkt));
         }
     }
 
@@ -183,8 +228,8 @@ impl WolframSession {
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path not supported for Wolfram load_file"))?;
         let escaped = path.replace('\\', "\\\\").replace('\"', "\\\"");
-        let expr = format!("Get[\"{escaped}\"]");
-        let _ = self.eval_to_string(&expr)?;
+        let expr = format!("Module[{{}}, Get[\"{escaped}\"]; \"OK\"]");
+        let _ = self.eval_to_string_expr(&expr)?;
         Ok(())
     }
 }
