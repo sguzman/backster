@@ -5,10 +5,10 @@ use crate::config::{BacktestConfig, DataConfig, StrategyConfig};
 use crate::strategy::Strategy;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
 use crate::wolfram::WolframSessionConfig;
-use crate::wolfram::data::fetch_close_bars;
+use crate::wolfram::data::{fetch_close_bars, fetch_close_bars_with_rolling_fit};
 
 pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
-    let bars = load_bars(data).context("Failed to load bars")?;
+    let (bars, fits) = load_bars_and_features(cfg, data).context("Failed to load data/features")?;
 
     let mut strategy: Box<dyn Strategy> = match &cfg.strategy {
         StrategyConfig::RollingPvaluePredictor {
@@ -22,6 +22,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             *exit_threshold,
             *normalize_weights,
             *min_total_weight,
+            fits,
         )),
     };
 
@@ -44,7 +45,10 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
     Ok(())
 }
 
-fn load_bars(data: &DataConfig) -> Result<Vec<Bar>> {
+fn load_bars_and_features(
+    cfg: &BacktestConfig,
+    data: &DataConfig,
+) -> Result<(Vec<Bar>, Vec<Option<crate::wolfram::data::RollingFitRow>>)> {
     match data {
         DataConfig::WolframFinancial {
             symbol,
@@ -58,7 +62,30 @@ fn load_bars(data: &DataConfig) -> Result<Vec<Bar>> {
             if let Some(k) = kernel {
                 kcfg.kernel = k.to_string();
             }
-            fetch_close_bars(&kcfg, symbol, start, end, field, resolution)
+            match cfg.strategy {
+                StrategyConfig::RollingPvaluePredictor { .. } => fetch_close_bars_with_rolling_fit(
+                    &kcfg,
+                    symbol,
+                    start,
+                    end,
+                    field,
+                    resolution,
+                    cfg.window,
+                ),
+            }
+        }
+        DataConfig::WolframExpr { expr, kernel } => {
+            let mut kcfg = WolframSessionConfig::default();
+            if let Some(k) = kernel {
+                kcfg.kernel = k.to_string();
+            }
+            match cfg.strategy {
+                StrategyConfig::RollingPvaluePredictor { .. } => crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(
+                    &kcfg,
+                    expr,
+                    cfg.window,
+                ),
+            }
         }
     }
 }

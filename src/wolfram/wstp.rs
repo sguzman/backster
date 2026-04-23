@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn WSError(link: WSLINK) -> c_int;
     fn WSErrorMessage(env: WSENV, error: c_int) -> *const c_char;
 
+    fn WSReady(link: WSLINK) -> c_int;
     fn WSNextPacket(link: WSLINK) -> c_int;
     fn WSNewPacket(link: WSLINK) -> c_int;
     fn WSEndPacket(link: WSLINK) -> c_int;
@@ -68,7 +69,7 @@ impl WolframSession {
         }
 
         let mut session = Self { env, link };
-        session.drain_to_first_input_prompt()?;
+        session.drain_startup_packets()?;
         Ok(session)
     }
 
@@ -152,18 +153,20 @@ impl WolframSession {
         }
     }
 
-    fn drain_to_first_input_prompt(&mut self) -> Result<()> {
-        // When launching, there can be initial packets. We just drain a few packets
-        // to reach a stable state.
+    fn drain_startup_packets(&mut self) -> Result<()> {
+        // On startup the kernel typically sends prompt/side-effect packets and then
+        // waits for input. Calling `WSNextPacket` unconditionally can block forever.
+        // Drain only packets that are already available.
         for _ in 0..64 {
-            let pkt = unsafe { WSNextPacket(self.link) };
-            if pkt == 0 {
-                self.fail_with_ws_error("Failed during initial WSTP handshake")?;
-            }
-            unsafe { WSNewPacket(self.link) };
-            if pkt == RETURNPKT {
+            let ready = unsafe { WSReady(self.link) };
+            if ready == 0 {
                 break;
             }
+            let pkt = unsafe { WSNextPacket(self.link) };
+            if pkt == 0 {
+                self.fail_with_ws_error("Failed draining initial WSTP packets")?;
+            }
+            unsafe { WSNewPacket(self.link) };
         }
         Ok(())
     }

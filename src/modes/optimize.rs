@@ -43,5 +43,12 @@ fn load_close_series(data: &DataConfig) -> Result<Vec<f64>> {
             }
             fetch_close_series(&kcfg, symbol, start, end, field, resolution)
         }
+        DataConfig::WolframExpr { expr, kernel } => {
+            let mut kcfg = WolframSessionConfig::default();
+            if let Some(k) = kernel {
+                kcfg.kernel = k.to_string();
+            }
+            crate::wolfram::data::fetch_expr_close_series(&kcfg, expr)
+        }
     }
 }

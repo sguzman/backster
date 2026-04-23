@@ -34,6 +34,12 @@ pub enum DataConfig {
         /// Optional kernel path/name (defaults to env `WOLFRAMKERNEL` or `WolframKernel`).
         kernel: Option<String>,
     },
+    WolframExpr {
+        /// Wolfram Language expression that evaluates to a `TimeSeries` or list of `{DateObject, value}`.
+        expr: String,
+        /// Optional kernel path/name (defaults to env `WOLFRAMKERNEL` or `WolframKernel`).
+        kernel: Option<String>,
+    },
 }
 
 fn default_field() -> String {

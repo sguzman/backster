@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::backtest::{BacktestContext, Bar};
-use crate::stats::rolling_fit::compute_window_fit;
+use crate::wolfram::data::RollingFitRow;
 
 use super::Strategy;
 
@@ -11,7 +11,8 @@ pub struct RollingPvaluePredictor {
     exit_threshold: f64,
     normalize_weights: bool,
     min_total_weight: f64,
-    closes: Vec<f64>,
+    fits: Vec<Option<RollingFitRow>>,
+    idx: usize,
 }
 
 impl RollingPvaluePredictor {
@@ -21,6 +22,7 @@ impl RollingPvaluePredictor {
         exit_threshold: f64,
         normalize_weights: bool,
         min_total_weight: f64,
+        fits: Vec<Option<RollingFitRow>>,
     ) -> Self {
         Self {
             window,
@@ -28,20 +30,9 @@ impl RollingPvaluePredictor {
             exit_threshold,
             normalize_weights,
             min_total_weight,
-            closes: Vec::new(),
+            fits,
+            idx: 0,
         }
-    }
-
-    fn log_returns(&self) -> Vec<f64> {
-        let mut out = Vec::with_capacity(self.closes.len().saturating_sub(1));
-        for w in self.closes.windows(2) {
-            let a = w[0];
-            let b = w[1];
-            if a > 0.0 && b > 0.0 && a.is_finite() && b.is_finite() {
-                out.push((b.ln() - a.ln()) as f64);
-            }
-        }
-        out
     }
 }
 
@@ -51,24 +42,49 @@ impl Strategy for RollingPvaluePredictor {
     }
 
     fn on_bar(&mut self, ctx: &mut BacktestContext, bar: &Bar) -> Result<()> {
-        self.closes.push(bar.close);
-        if self.closes.len() < self.window + 2 {
+        if self.idx >= self.fits.len() {
+            anyhow::bail!("Strategy received more bars than fit rows");
+        }
+        let fit = match &self.fits[self.idx] {
+            Some(f) => f,
+            None => {
+                self.idx += 1;
+                return Ok(());
+            }
+        };
+        self.idx += 1;
+
+        // Predictive value is a linear combination of the distribution "values"
+        // (mean/median of the fitted return distribution) weighted by p-values.
+        let mut total_weight = 0.0;
+        let mut weighted = 0.0;
+        for (p, v) in [
+            (fit.normal_p, fit.normal_value),
+            (fit.student_t_p, fit.student_t_value),
+            (fit.laplace_p, fit.laplace_value),
+            (fit.logistic_p, fit.logistic_value),
+            (fit.cauchy_p, fit.cauchy_value),
+        ] {
+            let p = p
+                .filter(|p| p.is_finite())
+                .map(|p| p.max(0.0))
+                .unwrap_or(0.0);
+            let v = v.filter(|v| v.is_finite()).unwrap_or(0.0);
+            total_weight += p;
+            weighted += p * v;
+        }
+        if total_weight < self.min_total_weight {
             return Ok(());
         }
 
-        let rets = self.log_returns();
-        if rets.len() < self.window {
-            return Ok(());
-        }
-        let sample = &rets[rets.len() - self.window..];
+        let predicted_log_return = if self.normalize_weights && total_weight > 0.0 {
+            weighted / total_weight
+        } else {
+            weighted
+        };
 
-        let fit = compute_window_fit(sample, self.normalize_weights)?;
-        if fit.total_weight < self.min_total_weight {
-            return Ok(());
-        }
-
-        let predicted_log_return = fit.weighted_value;
-        let predicted_next_close = bar.close * predicted_log_return.exp();
+        // Anchor is the current close; predictive is an additive step sized by expected log-return.
+        let predicted_next_close = bar.close * (1.0 + predicted_log_return);
 
         if ctx.position.is_none() {
             if predicted_next_close > bar.close * (1.0 + self.enter_threshold) {
@@ -84,4 +100,3 @@ impl Strategy for RollingPvaluePredictor {
         Ok(())
     }
 }
-
