@@ -35,6 +35,11 @@ fn parse_args_for_config_path() -> anyhow::Result<std::path::PathBuf> {
     let mut cfg: Option<std::path::PathBuf> = None;
 
     while let Some(a) = args.next() {
+        // Accept `backster config <file.toml>` as a convenience.
+        if a == "config" && cfg.is_none() {
+            cfg = args.next().map(std::path::PathBuf::from);
+            continue;
+        }
         if a == "--config" || a == "-c" {
             cfg = args.next().map(std::path::PathBuf::from);
         } else if cfg.is_none() {
