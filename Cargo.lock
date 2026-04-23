@@ -402,8 +402,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "nautilus-common",
  "nautilus-core",
+ "nautilus-execution",
  "nautilus-model",
+ "nautilus-portfolio",
  "nautilus-trading",
  "polars",
  "rand 0.8.6",
