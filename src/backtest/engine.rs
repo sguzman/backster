@@ -50,6 +50,11 @@ impl BacktestContext {
 
     pub fn enter_long(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
         anyhow::ensure!(self.position.is_none(), "Already in a position");
+        anyhow::ensure!(qty.is_finite() && qty > 0.0, "Invalid qty");
+        anyhow::ensure!(price.is_finite() && price > 0.0, "Invalid price");
+        let cost = qty * price;
+        anyhow::ensure!(self.cash + 1e-9 >= cost, "Insufficient cash");
+        self.cash -= cost;
         self.position = Some(Position {
             side: Side::Long,
             qty,
@@ -61,15 +66,31 @@ impl BacktestContext {
 
     pub fn exit(&mut self, price: f64, ts: DateTime<Utc>) -> Result<()> {
         let pos = self.position.take().ok_or_else(|| anyhow::anyhow!("No open position"))?;
+        anyhow::ensure!(price.is_finite() && price > 0.0, "Invalid price");
         let pnl = match pos.side {
             Side::Long => (price - pos.entry_price) * pos.qty,
             Side::Short => (pos.entry_price - price) * pos.qty,
         };
-        self.cash += pnl;
+        let proceeds = match pos.side {
+            Side::Long => pos.qty * price,
+            Side::Short => pos.qty * (2.0 * pos.entry_price - price),
+        };
+        self.cash += proceeds;
         self.stats.realized_pnl += pnl;
         self.stats.trades += 1;
         let _ = ts;
         Ok(())
+    }
+
+    pub fn equity(&self, mark_price: f64) -> f64 {
+        if let Some(pos) = &self.position {
+            match pos.side {
+                Side::Long => self.cash + pos.qty * mark_price,
+                Side::Short => self.cash + pos.qty * (2.0 * pos.entry_price - mark_price),
+            }
+        } else {
+            self.cash
+        }
     }
 }
 
@@ -92,4 +113,3 @@ impl BacktestEngine {
         Ok(ctx)
     }
 }
-

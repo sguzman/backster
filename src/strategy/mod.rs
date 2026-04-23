@@ -1,5 +1,7 @@
 use crate::backtest::{BacktestContext, Bar};
 
+pub mod rolling_pvalue;
+
 pub trait Strategy {
     fn name(&self) -> &'static str;
     fn on_start(&mut self, _ctx: &mut BacktestContext) -> anyhow::Result<()> {

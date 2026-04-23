@@ -1,0 +1,32 @@
+mode = "backtest"
+
+[data]
+source = "csv"
+path = "tmp/bars.csv"
+
+[backtest]
+starting_cash = 100000.0
+window = 126
+
+[backtest.strategy]
+kind = "rolling_pvalue_predictor"
+enter_threshold = 0.001
+exit_threshold = 0.0
+normalize_weights = true
+min_total_weight = 0.0
+
+# --- optimizer example ---
+#
+# mode = "optimize"
+#
+# [optimizer]
+# starting_cash = 100000.0
+# max_trades = 10
+# know_future = true
+# allow_long = true
+# allow_short = false
+#
+# [data]
+# source = "csv"
+# path = "tmp/bars.csv"
+
