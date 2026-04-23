@@ -1,0 +1,203 @@
+use std::ffi::{c_char, c_int, c_uchar, c_void, CStr, CString};
+
+use anyhow::{Context, Result};
+
+#[allow(non_camel_case_types)]
+type WSENV = *mut c_void;
+#[allow(non_camel_case_types)]
+type WSLINK = *mut c_void;
+
+unsafe extern "C" {
+    fn WSInitialize(param: *mut c_void) -> WSENV;
+    fn WSDeinitialize(env: WSENV);
+
+    fn WSOpenString(env: WSENV, command_line: *const c_char, error: *mut c_int) -> WSLINK;
+    fn WSClose(link: WSLINK);
+
+    fn WSError(link: WSLINK) -> c_int;
+    fn WSErrorMessage(env: WSENV, error: c_int) -> *const c_char;
+
+    fn WSNextPacket(link: WSLINK) -> c_int;
+    fn WSNewPacket(link: WSLINK) -> c_int;
+    fn WSEndPacket(link: WSLINK) -> c_int;
+    fn WSFlush(link: WSLINK) -> c_int;
+
+    fn WSPutFunction(link: WSLINK, f: *const c_char, arg_count: c_int) -> c_int;
+    fn WSPutString(link: WSLINK, s: *const c_char) -> c_int;
+
+    fn WSGetString(link: WSLINK, s: *mut *const c_char) -> c_int;
+    fn WSReleaseString(link: WSLINK, s: *const c_char) -> c_int;
+}
+
+const RETURNPKT: c_int = 3;
+
+#[derive(Debug, Clone)]
+pub struct WolframSessionConfig {
+    /// Kernel executable, e.g. `WolframKernel` or an absolute path.
+    pub kernel: String,
+}
+
+impl Default for WolframSessionConfig {
+    fn default() -> Self {
+        Self {
+            kernel: std::env::var("WOLFRAMKERNEL").unwrap_or_else(|_| "WolframKernel".to_string()),
+        }
+    }
+}
+
+pub struct WolframSession {
+    env: WSENV,
+    link: WSLINK,
+}
+
+impl WolframSession {
+    pub fn connect(config: WolframSessionConfig) -> Result<Self> {
+        let env = unsafe { WSInitialize(std::ptr::null_mut()) };
+        anyhow::ensure!(!env.is_null(), "WSInitialize failed (env is null)");
+
+        let linkname = format!("{} -wstp", config.kernel);
+        let cmd = format!("-linkmode launch -linkname '{}'", linkname.replace('\'', "\\'"));
+        let cmd_c = CString::new(cmd).context("Invalid WSTP command string")?;
+
+        let mut error: c_int = 0;
+        let link = unsafe { WSOpenString(env, cmd_c.as_ptr(), &mut error as *mut c_int) };
+        if link.is_null() || error != 0 {
+            let msg = unsafe { error_message(env, error) };
+            unsafe { WSDeinitialize(env) };
+            anyhow::bail!("WSOpenString failed (error={error}): {msg}");
+        }
+
+        let mut session = Self { env, link };
+        session.drain_to_first_input_prompt()?;
+        Ok(session)
+    }
+
+    /// Evaluates Wolfram Language code and returns `ToString[..., InputForm]`.
+    pub fn eval_to_string(&mut self, code: &str) -> Result<String> {
+        let code_c = CString::new(code).context("Code contains NUL byte")?;
+
+        // EvaluatePacket[ToString[ToExpression[code], InputForm]]
+        self.put_function("EvaluatePacket", 1)?;
+        self.put_function("ToString", 2)?;
+        self.put_function("ToExpression", 1)?;
+        self.put_string(code_c.as_c_str())?;
+        self.end_packet()?;
+        self.flush()?;
+
+        self.read_return_string()
+            .with_context(|| format!("Failed evaluating WSTP code: {code}"))
+    }
+
+    fn put_function(&mut self, name: &str, argc: i32) -> Result<()> {
+        let c = CString::new(name).context("Function name contains NUL byte")?;
+        let ok = unsafe { WSPutFunction(self.link, c.as_ptr(), argc as c_int) };
+        anyhow::ensure!(ok != 0, "WSPutFunction failed: {name}");
+        Ok(())
+    }
+
+    fn put_string(&mut self, s: &CStr) -> Result<()> {
+        let ok = unsafe { WSPutString(self.link, s.as_ptr()) };
+        anyhow::ensure!(ok != 0, "WSPutString failed");
+        Ok(())
+    }
+
+    fn end_packet(&mut self) -> Result<()> {
+        let ok = unsafe { WSEndPacket(self.link) };
+        anyhow::ensure!(ok != 0, "WSEndPacket failed");
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        let ok = unsafe { WSFlush(self.link) };
+        anyhow::ensure!(ok != 0, "WSFlush failed");
+        Ok(())
+    }
+
+    fn read_return_string(&mut self) -> Result<String> {
+        loop {
+            let pkt = unsafe { WSNextPacket(self.link) };
+            if pkt == 0 {
+                self.fail_with_ws_error("WSNextPacket returned 0")?;
+            }
+            if pkt == RETURNPKT {
+                let mut out: *const c_char = std::ptr::null();
+                let ok = unsafe { WSGetString(self.link, &mut out as *mut *const c_char) };
+                anyhow::ensure!(ok != 0, "WSGetString failed");
+                let s = unsafe { CStr::from_ptr(out) }
+                    .to_string_lossy()
+                    .to_string();
+                unsafe { WSReleaseString(self.link, out) };
+                unsafe { WSNewPacket(self.link) };
+                return Ok(s);
+            }
+            unsafe { WSNewPacket(self.link) };
+        }
+    }
+
+    fn drain_to_first_input_prompt(&mut self) -> Result<()> {
+        // When launching, there can be initial packets. We just drain a few packets
+        // to reach a stable state.
+        for _ in 0..64 {
+            let pkt = unsafe { WSNextPacket(self.link) };
+            if pkt == 0 {
+                self.fail_with_ws_error("Failed during initial WSTP handshake")?;
+            }
+            unsafe { WSNewPacket(self.link) };
+            if pkt == RETURNPKT {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn fail_with_ws_error(&mut self, context: &str) -> Result<()> {
+        let err = unsafe { WSError(self.link) };
+        let msg = unsafe { error_message(self.env, err) };
+        anyhow::bail!("{context}: WSError={err} ({msg})")
+    }
+
+    /// Evaluates `Get["/path/to/file.wls"]` (or `.wl`) in the kernel session.
+    pub fn load_file(&mut self, path: &std::path::Path) -> Result<()> {
+        let path = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Non-UTF8 path not supported for Wolfram load_file"))?;
+        let escaped = path.replace('\\', "\\\\").replace('\"', "\\\"");
+        let expr = format!("Get[\"{escaped}\"]");
+        let _ = self.eval_to_string(&expr)?;
+        Ok(())
+    }
+}
+
+impl Drop for WolframSession {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.link.is_null() {
+                WSClose(self.link);
+                self.link = std::ptr::null_mut();
+            }
+            if !self.env.is_null() {
+                WSDeinitialize(self.env);
+                self.env = std::ptr::null_mut();
+            }
+        }
+    }
+}
+
+unsafe fn error_message(env: WSENV, err: c_int) -> String {
+    let ptr = unsafe { WSErrorMessage(env, err) };
+    if ptr.is_null() {
+        return format!("Unknown WSTP error {err}");
+    }
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().to_string()
+}
+
+// Keep the file anchored to WSTP presence; this also gives a slightly nicer error
+// if the ABI is wrong at runtime.
+#[allow(dead_code)]
+fn _wstp_abi_sanity() {
+    let _ = std::mem::size_of::<WSENV>();
+    let _ = std::mem::size_of::<WSLINK>();
+    let _ = std::mem::size_of::<c_int>();
+    let _ = std::mem::size_of::<c_char>();
+    let _ = std::mem::size_of::<c_uchar>();
+}

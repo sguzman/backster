@@ -1,2 +1,2 @@
-pub mod script;
-pub use script::WolframRunner;
+pub mod wstp;
+pub use wstp::{WolframSession, WolframSessionConfig};
