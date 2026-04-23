@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::config::{DataConfig, OptimizerConfig};
-use crate::data::loader::DataLoader;
 use crate::optimizer::{optimize_trades, OptimizeInput};
-use crate::wolfram::{WolframSession, WolframSessionConfig};
+use crate::wolfram::WolframSessionConfig;
+use crate::wolfram::data::fetch_close_series;
 
 pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
     if !cfg.know_future {
@@ -29,44 +29,19 @@ pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
 
 fn load_close_series(data: &DataConfig) -> Result<Vec<f64>> {
     match data {
-        DataConfig::Csv { path } => {
-            let df = DataLoader::load_csv(path)?;
-            let close_col = df.column("close").context("Missing `close` column")?;
-            let mut out = Vec::with_capacity(df.height());
-            for i in 0..df.height() {
-                out.push(DataLoader::get_f64(close_col, i)?);
-            }
-            Ok(out)
-        }
-        DataConfig::Wolfram {
-            expr,
-            output_csv,
+        DataConfig::WolframFinancial {
+            symbol,
+            start,
+            end,
+            field,
+            resolution,
             kernel,
         } => {
-            let mut cfg = WolframSessionConfig::default();
+            let mut kcfg = WolframSessionConfig::default();
             if let Some(k) = kernel {
-                cfg.kernel = k.to_string();
+                kcfg.kernel = k.to_string();
             }
-            let mut sess = WolframSession::connect(cfg)?;
-
-            let path = output_csv
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("Non-UTF8 output_csv path not supported"))?;
-            let escaped = path.replace('\\', "\\\\").replace('\"', "\\\"");
-            let code = format!("Export[\"{escaped}\", ({expr}), \"CSV\"]");
-            let res = sess.eval_to_string(&code)?;
-            if res == "$Failed" {
-                anyhow::bail!("Wolfram export returned $Failed");
-            }
-
-            let df = DataLoader::load_csv(output_csv)?;
-            let close_col = df.column("close").context("Missing `close` column")?;
-            let mut out = Vec::with_capacity(df.height());
-            for i in 0..df.height() {
-                out.push(DataLoader::get_f64(close_col, i)?);
-            }
-            Ok(out)
+            fetch_close_series(&kcfg, symbol, start, end, field, resolution)
         }
     }
 }
-

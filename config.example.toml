@@ -1,8 +1,12 @@
 mode = "backtest"
 
 [data]
-source = "csv"
-path = "tmp/bars.csv"
+source = "wolfram_financial"
+symbol = "AAPL"
+start = "2020-01-01"
+end = "2021-01-01"
+field = "Close"
+resolution = "day"
 
 [backtest]
 starting_cash = 100000.0
@@ -27,6 +31,8 @@ min_total_weight = 0.0
 # allow_short = false
 #
 # [data]
-# source = "csv"
-# path = "tmp/bars.csv"
-
+# source = "wolfram_financial"
+# symbol = "AAPL"
+# start = "2020-01-01"
+# end = "2021-01-01"
+# field = "Close"

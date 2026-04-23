@@ -88,6 +88,24 @@ impl WolframSession {
             .with_context(|| format!("Failed evaluating WSTP code: {code}"))
     }
 
+    /// Evaluates a Wolfram Language expression that must return a string.
+    ///
+    /// This avoids `ToString[..., InputForm]` escaping, which is important when
+    /// you want raw JSON from `ExportString[..., "JSON"]`.
+    pub fn eval_to_string_expr(&mut self, expr: &str) -> Result<String> {
+        let expr_c = CString::new(expr).context("Expression contains NUL byte")?;
+
+        // EvaluatePacket[ToExpression[expr]]
+        self.put_function("EvaluatePacket", 1)?;
+        self.put_function("ToExpression", 1)?;
+        self.put_string(expr_c.as_c_str())?;
+        self.end_packet()?;
+        self.flush()?;
+
+        self.read_return_string()
+            .with_context(|| format!("Failed evaluating WSTP expr: {expr}"))
+    }
+
     fn put_function(&mut self, name: &str, argc: i32) -> Result<()> {
         let c = CString::new(name).context("Function name contains NUL byte")?;
         let ok = unsafe { WSPutFunction(self.link, c.as_ptr(), argc as c_int) };

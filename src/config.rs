@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,15 +18,30 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum DataConfig {
-    Csv { path: PathBuf },
-    Wolfram {
-        /// Wolfram Language expression that evaluates to a 2D table exportable to CSV.
-        expr: String,
-        /// Where to write the exported CSV on disk.
-        output_csv: PathBuf,
-        /// Optional kernel path/name (defaults to `WolframKernel`).
+    WolframFinancial {
+        /// Asset identifier passed to Wolfram `FinancialData`, e.g. `"AAPL"`, `"BTC/USD"`, etc.
+        symbol: String,
+        /// ISO date string, e.g. `"2020-01-01"`.
+        start: String,
+        /// ISO date string, e.g. `"2024-01-01"`.
+        end: String,
+        /// FinancialData property to retrieve (default: "Close").
+        #[serde(default = "default_field")]
+        field: String,
+        /// Time resolution hint (currently only `"day"` is supported).
+        #[serde(default = "default_resolution")]
+        resolution: String,
+        /// Optional kernel path/name (defaults to env `WOLFRAMKERNEL` or `WolframKernel`).
         kernel: Option<String>,
     },
+}
+
+fn default_field() -> String {
+    "Close".to_string()
+}
+
+fn default_resolution() -> String {
+    "day".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,4 +79,3 @@ pub struct OptimizerConfig {
     #[serde(default)]
     pub know_future: bool,
 }
-
