@@ -12,6 +12,7 @@ pub struct RollingPvaluePredictor {
     exit_threshold: f64,
     normalize_weights: bool,
     min_total_weight: f64,
+    force_trade_each_bar: bool,
     fits: Vec<Option<RollingFitRow>>,
     idx: usize,
     holding_bars: usize,
@@ -25,6 +26,7 @@ impl RollingPvaluePredictor {
         exit_threshold: f64,
         normalize_weights: bool,
         min_total_weight: f64,
+        force_trade_each_bar: bool,
         fits: Vec<Option<RollingFitRow>>,
     ) -> Self {
         Self {
@@ -34,6 +36,7 @@ impl RollingPvaluePredictor {
             exit_threshold,
             normalize_weights,
             min_total_weight,
+            force_trade_each_bar,
             fits,
             idx: 0,
             holding_bars: 0,
@@ -47,6 +50,25 @@ impl Strategy for RollingPvaluePredictor {
     }
 
     fn on_bar(&mut self, ctx: &mut BacktestContext, bar: &Bar) -> Result<()> {
+        // Current bar index (0-based). For WSTP-provided fits, fits.len() should match bars.len().
+        let bar_index = self.idx;
+        let is_last_bar = bar_index + 1 >= self.fits.len();
+
+        if self.force_trade_each_bar {
+            // Force exactly one completed trade per bar after the first:
+            // - If a position is open, exit it at this bar's close (realizes P&L for the last day).
+            // - Re-enter immediately at this bar's close, except on the final bar (so the test ends flat).
+            if ctx.position.is_some() {
+                ctx.exit(bar.close, bar.ts)?;
+            }
+            if !is_last_bar && ctx.position.is_none() {
+                let qty = ctx.cash / bar.close;
+                if qty > 0.0 {
+                    ctx.enter_long(qty, bar.close, bar.ts)?;
+                }
+            }
+            self.holding_bars = 0;
+        } else {
         // If we're in a position, enforce the configured holding period.
         if ctx.position.is_some() {
             self.holding_bars += 1;
@@ -54,6 +76,7 @@ impl Strategy for RollingPvaluePredictor {
                 ctx.exit(bar.close, bar.ts)?;
                 self.holding_bars = 0;
             }
+        }
         }
 
         if self.idx >= self.fits.len() {
@@ -99,6 +122,11 @@ impl Strategy for RollingPvaluePredictor {
 
         // Anchor is the current close; predictive is a 1-step ahead price using log-return.
         let predicted_next_close = bar.close * predicted_log_return.exp();
+
+        if self.force_trade_each_bar {
+            // In force mode, entries/exits are handled above.
+            return Ok(());
+        }
 
         if ctx.position.is_none() {
             if predicted_next_close > bar.close * (1.0 + self.enter_threshold) {

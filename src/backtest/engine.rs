@@ -37,6 +37,8 @@ pub struct BacktestContext {
     pub cash: f64,
     pub position: Option<Position>,
     pub stats: BacktestStats,
+    log_trades: bool,
+    trade_resolution: String,
 }
 
 impl BacktestContext {
@@ -45,7 +47,14 @@ impl BacktestContext {
             cash: starting_cash,
             position: None,
             stats: BacktestStats::default(),
+            log_trades: false,
+            trade_resolution: "bar".to_string(),
         }
+    }
+
+    pub fn set_trade_logging(&mut self, enabled: bool, trade_resolution: String) {
+        self.log_trades = enabled;
+        self.trade_resolution = trade_resolution;
     }
 
     pub fn enter_long(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
@@ -61,6 +70,16 @@ impl BacktestContext {
             entry_price: price,
             entry_ts: ts,
         });
+        if self.log_trades {
+            eprintln!(
+                "[trade][enter][{}][res={}] qty={:.6} price={:.6} cash={:.2}",
+                ts.to_rfc3339(),
+                self.trade_resolution,
+                qty,
+                price,
+                self.cash
+            );
+        }
         Ok(())
     }
 
@@ -78,6 +97,18 @@ impl BacktestContext {
         self.cash += proceeds;
         self.stats.realized_pnl += pnl;
         self.stats.trades += 1;
+        if self.log_trades {
+            eprintln!(
+                "[trade][exit][{}][res={}] entry={:.6} exit={:.6} qty={:.6} pnl={:.6} cash={:.2}",
+                ts.to_rfc3339(),
+                self.trade_resolution,
+                pos.entry_price,
+                price,
+                pos.qty,
+                pnl,
+                self.cash
+            );
+        }
         let _ = ts;
         Ok(())
     }
@@ -106,45 +137,16 @@ impl BacktestEngine {
 
     pub fn run(&self, bars: &[Bar], strategy: &mut dyn Strategy) -> Result<BacktestContext> {
         let mut ctx = BacktestContext::new(self.starting_cash);
+        ctx.set_trade_logging(self.log.log_trades, self.log.trade_resolution.clone());
         strategy.on_start(&mut ctx)?;
 
         for bar in bars {
             let before_cash = ctx.cash;
             let before_equity = ctx.equity(bar.close);
-            let before_pos = ctx.position.clone();
+            let _before_pos = ctx.position.clone();
 
             strategy.on_bar(&mut ctx, bar)?;
-
-            if self.log.log_trades {
-                match (&before_pos, &ctx.position) {
-                    (None, Some(pos)) => {
-                        eprintln!(
-                            "[trade][enter][{}][{:?}] qty={:.6} price={:.6} cash={:.2} equity={:.2}",
-                            bar.ts.to_rfc3339(),
-                            pos.side,
-                            pos.qty,
-                            pos.entry_price,
-                            ctx.cash,
-                            ctx.equity(bar.close)
-                        );
-                    }
-                    (Some(pos), None) => {
-                        // Exit: realized pnl is accumulated in ctx.stats.
-                        let after_equity = ctx.equity(bar.close);
-                        eprintln!(
-                            "[trade][exit][{}][{:?}] entry_price={:.6} exit_price={:.6} qty={:.6} cash={:.2} equity={:.2}",
-                            bar.ts.to_rfc3339(),
-                            pos.side,
-                            pos.entry_price,
-                            bar.close,
-                            pos.qty,
-                            ctx.cash,
-                            after_equity
-                        );
-                    }
-                    _ => {}
-                }
-            }
+            let _ = _before_pos;
 
             if self.log.log_bars {
                 let pos_desc = ctx

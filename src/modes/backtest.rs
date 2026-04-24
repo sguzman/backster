@@ -16,6 +16,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             exit_threshold,
             normalize_weights,
             min_total_weight,
+            force_trade_each_bar,
         } => Box::new(RollingPvaluePredictor::new(
             cfg.window,
             cfg.holding_period_bars,
@@ -23,6 +24,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             *exit_threshold,
             *normalize_weights,
             *min_total_weight,
+            *force_trade_each_bar,
             fits,
         )),
     };

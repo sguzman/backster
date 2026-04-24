@@ -91,6 +91,10 @@ pub enum StrategyConfig {
         normalize_weights: bool,
         #[serde(default = "default_min_total_weight")]
         min_total_weight: f64,
+        /// If true, forces exactly one round-trip per bar (exit then re-enter),
+        /// yielding consistent "daily" trading when your data resolution is daily.
+        #[serde(default)]
+        force_trade_each_bar: bool,
     },
 }
 
