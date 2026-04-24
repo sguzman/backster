@@ -6,7 +6,7 @@ use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_series;
 use tracing::info;
 
-pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
+pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig, quiet: bool) -> Result<f64> {
     if !cfg.know_future {
         anyhow::bail!("optimize mode with know_future=false is not implemented yet");
     }
@@ -20,9 +20,22 @@ pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
         allow_short: cfg.allow_short,
     })?;
 
-    info!(final_cash = res.final_cash, trades_used = res.trades_used, "Optimizer done");
+    let pct_return = if cfg.starting_cash.abs() > 0.0 {
+        100.0 * (res.final_cash - cfg.starting_cash) / cfg.starting_cash
+    } else {
+        0.0
+    };
 
-    Ok(())
+    if !quiet {
+        info!(
+            final_cash = res.final_cash,
+            trades_used = res.trades_used,
+            return_pct = pct_return,
+            "Optimizer done"
+        );
+    }
+
+    Ok(pct_return)
 }
 
 fn load_close_series(data: &DataConfig) -> Result<Vec<f64>> {

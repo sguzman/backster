@@ -2,7 +2,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rand::SeedableRng;
 use tracing::info;
-use owo_colors::OwoColorize;
 
 use crate::strategy::Strategy;
 
@@ -89,16 +88,15 @@ impl BacktestContext {
             entry_ts: ts,
         });
         if self.log_trades {
-            let msg = format!(
-                "{} {} res={} qty={:.6} price={:.6} cash={:.2}",
-                "[trade]".bright_black(),
-                "ENTER_LONG".green().bold(),
-                self.trade_resolution.cyan(),
-                qty,
-                price,
-                self.cash
+            info!(
+                ts = %ts.to_rfc3339(),
+                res = %self.trade_resolution,
+                side = "long",
+                qty = qty,
+                price = price,
+                cash = self.cash,
+                "trade_enter"
             );
-            info!(ts = %ts.to_rfc3339(), "{msg}");
         }
         Ok(())
     }
@@ -117,16 +115,15 @@ impl BacktestContext {
             entry_ts: ts,
         });
         if self.log_trades {
-            let msg = format!(
-                "{} {} res={} qty={:.6} price={:.6} cash={:.2}",
-                "[trade]".bright_black(),
-                "ENTER_SHORT".red().bold(),
-                self.trade_resolution.cyan(),
-                qty,
-                price,
-                self.cash
+            info!(
+                ts = %ts.to_rfc3339(),
+                res = %self.trade_resolution,
+                side = "short",
+                qty = qty,
+                price = price,
+                cash = self.cash,
+                "trade_enter"
             );
-            info!(ts = %ts.to_rfc3339(), "{msg}");
         }
         Ok(())
     }
@@ -146,27 +143,17 @@ impl BacktestContext {
         self.stats.realized_pnl += pnl;
         self.stats.trades += 1;
         if self.log_trades {
-            let kind: String = match pos.side {
-                Side::Long => "EXIT_LONG".green().bold().to_string(),
-                Side::Short => "EXIT_SHORT".red().bold().to_string(),
-            };
-            let pnl_s: String = if pnl >= 0.0 {
-                format!("{pnl:.6}").green().to_string()
-            } else {
-                format!("{pnl:.6}").red().to_string()
-            };
-            let msg = format!(
-                "{} {} res={} entry={:.6} exit={:.6} qty={:.6} pnl={} cash={:.2}",
-                "[trade]".bright_black(),
-                kind,
-                self.trade_resolution.cyan(),
-                pos.entry_price,
-                price,
-                pos.qty,
-                pnl_s,
-                self.cash
+            info!(
+                ts = %ts.to_rfc3339(),
+                res = %self.trade_resolution,
+                side = ?pos.side,
+                entry = pos.entry_price,
+                exit = price,
+                qty = pos.qty,
+                pnl = pnl,
+                cash = self.cash,
+                "trade_exit"
             );
-            info!(ts = %ts.to_rfc3339(), "{msg}");
         }
         let _ = ts;
         Ok(())
@@ -194,19 +181,14 @@ impl BacktestEngine {
         Self { starting_cash, log }
     }
 
-    pub fn run(
-        &self,
-        bars: &[Bar],
-        strategy: &mut dyn Strategy,
-        seed: Option<u64>,
-    ) -> Result<BacktestContext> {
-        let seed = seed.unwrap_or_else(|| {
+    pub fn run(&self, bars: &[Bar], strategy: &mut dyn Strategy) -> Result<BacktestContext> {
+        let seed = {
             use rand::TryRngCore;
             let mut bytes = [0u8; 8];
             let mut rng = rand::rngs::OsRng;
             rng.try_fill_bytes(&mut bytes).expect("OsRng failed");
             u64::from_le_bytes(bytes)
-        });
+        };
         let mut ctx = BacktestContext::new(self.starting_cash, seed);
         ctx.set_logging(
             self.log.log_trades,
@@ -229,18 +211,17 @@ impl BacktestEngine {
                     .as_ref()
                     .map(|p| format!("{:?} qty={:.6} entry={:.6}", p.side, p.qty, p.entry_price))
                     .unwrap_or_else(|| "flat".to_string());
-                let msg = format!(
-                    "{} res={} close={} cash={}→{} eq={}→{} {}",
-                    "[bar]".bright_black(),
-                    self.log.trade_resolution.cyan(),
-                    format!("{:.6}", bar.close).white().bold(),
-                    format!("{before_cash:.2}").yellow(),
-                    format!("{:.2}", ctx.cash).yellow(),
-                    format!("{before_equity:.2}").magenta(),
-                    format!("{:.2}", ctx.equity(bar.close)).magenta(),
-                    pos_desc.bright_black(),
+                info!(
+                    ts = %bar.ts.to_rfc3339(),
+                    trade_res = %self.log.trade_resolution,
+                    close = bar.close,
+                    cash_before = before_cash,
+                    cash_after = ctx.cash,
+                    eq_before = before_equity,
+                    eq_after = ctx.equity(bar.close),
+                    position = %pos_desc,
+                    "bar"
                 );
-                info!(ts = %bar.ts.to_rfc3339(), "{msg}");
             }
 
         }

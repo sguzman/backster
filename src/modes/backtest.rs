@@ -8,7 +8,7 @@ use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_bars_with_rolling_fit;
 use tracing::info;
 
-pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
+pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Result<f64> {
     let (bars, fits) = load_bars_and_features(cfg, data).context("Failed to load data/features")?;
 
     let mut strategy: Box<dyn Strategy> = match &cfg.strategy {
@@ -43,7 +43,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             trade_resolution: cfg.trade_resolution.clone(),
         },
     );
-    let out = engine.run(&bars, strategy.as_mut(), cfg.seed)?;
+    let out = engine.run(&bars, strategy.as_mut())?;
     let last_close = bars.last().map(|b| b.close).unwrap_or(0.0);
     let final_equity = out.equity(last_close);
     let pct_return = if cfg.starting_cash.abs() > 0.0 {
@@ -52,18 +52,20 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
         0.0
     };
 
-    info!(
-        seed = out.seed,
-        starting_cash = cfg.starting_cash,
-        trades = out.stats.trades,
-        realized_pnl = out.stats.realized_pnl,
-        final_cash = out.cash,
-        final_equity = final_equity,
-        return_pct = pct_return,
-        "Backtest done"
-    );
+    if !quiet {
+        info!(
+            seed = out.seed,
+            starting_cash = cfg.starting_cash,
+            trades = out.stats.trades,
+            realized_pnl = out.stats.realized_pnl,
+            final_cash = out.cash,
+            final_equity = final_equity,
+            return_pct = pct_return,
+            "Backtest done"
+        );
+    }
 
-    Ok(())
+    Ok(pct_return)
 }
 
 fn load_bars_and_features(

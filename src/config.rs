@@ -62,9 +62,6 @@ pub struct BacktestConfig {
     pub log_bars: bool,
     #[serde(default = "default_log_trades")]
     pub log_trades: bool,
-    /// RNG seed for reproducible strategy randomness. If omitted, a fresh seed is generated each run.
-    #[serde(default)]
-    pub seed: Option<u64>,
     pub strategy: StrategyConfig,
 }
 
