@@ -140,7 +140,7 @@ BacksterFinancialDataCloseAndFitJSON[
         Quiet@Check[
           FinancialData[
             symbol,
-            {{DateObject[start], DateObject[end]}},
+            {DateObject[start], DateObject[end]},
             field
           ],
           $Failed
