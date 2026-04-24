@@ -38,18 +38,28 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
         BacktestLogConfig {
             log_bars: cfg.log_bars,
             log_trades: cfg.log_trades,
+            log_strategy: cfg.log_bars,
             trade_resolution: cfg.trade_resolution.clone(),
         },
     );
     let out = engine.run(&bars, strategy.as_mut(), cfg.seed)?;
     let last_close = bars.last().map(|b| b.close).unwrap_or(0.0);
+    let final_equity = out.equity(last_close);
+    let pct_return = if cfg.starting_cash.abs() > 0.0 {
+        100.0 * (final_equity - cfg.starting_cash) / cfg.starting_cash
+    } else {
+        0.0
+    };
 
     println!(
-        "Backtest done: trades={}, realized_pnl={:.4}, final_cash={:.4}, final_equity={:.4}",
+        "Backtest done: seed={}, starting_cash={:.2}, trades={}, realized_pnl={:.4}, final_cash={:.4}, final_equity={:.4}, return_pct={:.4}%",
+        out.seed,
+        cfg.starting_cash,
         out.stats.trades,
         out.stats.realized_pnl,
         out.cash,
-        out.equity(last_close)
+        final_equity,
+        pct_return
     );
 
     Ok(())

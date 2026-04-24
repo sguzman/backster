@@ -38,7 +38,9 @@ pub struct BacktestContext {
     pub cash: f64,
     pub position: Option<Position>,
     pub stats: BacktestStats,
+    pub seed: u64,
     log_trades: bool,
+    log_strategy: bool,
     trade_resolution: String,
     rng: rand_chacha::ChaCha8Rng,
 }
@@ -49,19 +51,26 @@ impl BacktestContext {
             cash: starting_cash,
             position: None,
             stats: BacktestStats::default(),
+            seed,
             log_trades: false,
+            log_strategy: false,
             trade_resolution: "bar".to_string(),
             rng: rand_chacha::ChaCha8Rng::seed_from_u64(seed),
         }
     }
 
-    pub fn set_trade_logging(&mut self, enabled: bool, trade_resolution: String) {
-        self.log_trades = enabled;
+    pub fn set_logging(&mut self, log_trades: bool, log_strategy: bool, trade_resolution: String) {
+        self.log_trades = log_trades;
+        self.log_strategy = log_strategy;
         self.trade_resolution = trade_resolution;
     }
 
     pub fn rng(&mut self) -> &mut rand_chacha::ChaCha8Rng {
         &mut self.rng
+    }
+
+    pub fn log_strategy(&self) -> bool {
+        self.log_strategy
     }
 
     pub fn enter_long(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
@@ -146,10 +155,21 @@ impl BacktestEngine {
         &self,
         bars: &[Bar],
         strategy: &mut dyn Strategy,
-        seed: u64,
+        seed: Option<u64>,
     ) -> Result<BacktestContext> {
+        let seed = seed.unwrap_or_else(|| {
+            use rand::TryRngCore;
+            let mut bytes = [0u8; 8];
+            let mut rng = rand::rngs::OsRng;
+            rng.try_fill_bytes(&mut bytes).expect("OsRng failed");
+            u64::from_le_bytes(bytes)
+        });
         let mut ctx = BacktestContext::new(self.starting_cash, seed);
-        ctx.set_trade_logging(self.log.log_trades, self.log.trade_resolution.clone());
+        ctx.set_logging(
+            self.log.log_trades,
+            self.log.log_strategy,
+            self.log.trade_resolution.clone(),
+        );
         strategy.on_start(&mut ctx)?;
 
         for bar in bars {
@@ -189,5 +209,6 @@ impl BacktestEngine {
 pub struct BacktestLogConfig {
     pub log_bars: bool,
     pub log_trades: bool,
+    pub log_strategy: bool,
     pub trade_resolution: String,
 }

@@ -184,6 +184,28 @@ impl Strategy for RollingPvaluePredictor {
         // Anchor is the current close; predictive is a 1-step ahead price using log-return.
         let predicted_next_close = bar.close * predicted_log_return.exp();
 
+        if ctx.log_strategy() {
+            eprintln!(
+                "[strategy][rolling_pvalue][{}]\tclose={:.6}\tpred_lr={:.8}\tpred_next={:.6}\ttw={:.6}\tW={:.8}\tN(p={:.4},x={:.6})\tT(p={:.4},x={:.6})\tL(p={:.4},x={:.6})\tLog(p={:.4},x={:.6})\tC(p={:.4},x={:.6})",
+                bar.ts.to_rfc3339(),
+                bar.close,
+                predicted_log_return,
+                predicted_next_close,
+                total_weight,
+                weighted,
+                fit.normal_p.unwrap_or(0.0),
+                normal_draw.unwrap_or(0.0),
+                fit.student_t_p.unwrap_or(0.0),
+                student_draw.unwrap_or(0.0),
+                fit.laplace_p.unwrap_or(0.0),
+                laplace_draw.unwrap_or(0.0),
+                fit.logistic_p.unwrap_or(0.0),
+                logistic_draw.unwrap_or(0.0),
+                fit.cauchy_p.unwrap_or(0.0),
+                cauchy_draw.unwrap_or(0.0),
+            );
+        }
+
         if self.force_trade_each_bar {
             // In force mode, entries/exits are handled above.
             return Ok(());

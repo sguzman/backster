@@ -96,7 +96,8 @@ backsterRollingFitRows[data_, distFamilies_List, windowSize_Integer?Positive] :=
 
     (* Deterministic: return numeric distribution parameters for Rust-side sampling.
        This is safe to cache. *)
-    safeParams[fit_] := Quiet@Check[Rest[List @@ fit], Missing["NotAvailable"]];
+    (* `List @@ Dist[...]` already returns the parameter list (no head). Do NOT `Rest` it. *)
+    safeParams[fit_] := Quiet@Check[List @@ fit, Missing["NotAvailable"]];
     padParams[p_, n_] := If[ListQ[p], PadRight[p, n, Null], ConstantArray[Null, n]];
 
     rows =

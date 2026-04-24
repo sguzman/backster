@@ -15,7 +15,7 @@ trade_resolution = "bar"
 holding_period_bars = 1
 log_bars = true
 log_trades = true
-seed = 1
+# seed = 1  # optional; set for reproducible randomness
 
 [backtest.strategy]
 kind = "rolling_pvalue_predictor"
