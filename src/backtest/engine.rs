@@ -1,6 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rand::SeedableRng;
+use tracing::info;
+use owo_colors::OwoColorize;
 
 use crate::strategy::Strategy;
 
@@ -87,14 +89,44 @@ impl BacktestContext {
             entry_ts: ts,
         });
         if self.log_trades {
-            eprintln!(
-                "[trade][enter][{}][res={}] qty={:.6} price={:.6} cash={:.2}",
-                ts.to_rfc3339(),
-                self.trade_resolution,
+            let msg = format!(
+                "{} {} res={} qty={:.6} price={:.6} cash={:.2}",
+                "[trade]".bright_black(),
+                "ENTER_LONG".green().bold(),
+                self.trade_resolution.cyan(),
                 qty,
                 price,
                 self.cash
             );
+            info!(ts = %ts.to_rfc3339(), "{msg}");
+        }
+        Ok(())
+    }
+
+    pub fn enter_short(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
+        anyhow::ensure!(self.position.is_none(), "Already in a position");
+        anyhow::ensure!(qty.is_finite() && qty > 0.0, "Invalid qty");
+        anyhow::ensure!(price.is_finite() && price > 0.0, "Invalid price");
+        let collateral = qty * price;
+        anyhow::ensure!(self.cash + 1e-9 >= collateral, "Insufficient cash (short collateral)");
+        self.cash -= collateral;
+        self.position = Some(Position {
+            side: Side::Short,
+            qty,
+            entry_price: price,
+            entry_ts: ts,
+        });
+        if self.log_trades {
+            let msg = format!(
+                "{} {} res={} qty={:.6} price={:.6} cash={:.2}",
+                "[trade]".bright_black(),
+                "ENTER_SHORT".red().bold(),
+                self.trade_resolution.cyan(),
+                qty,
+                price,
+                self.cash
+            );
+            info!(ts = %ts.to_rfc3339(), "{msg}");
         }
         Ok(())
     }
@@ -114,16 +146,27 @@ impl BacktestContext {
         self.stats.realized_pnl += pnl;
         self.stats.trades += 1;
         if self.log_trades {
-            eprintln!(
-                "[trade][exit][{}][res={}] entry={:.6} exit={:.6} qty={:.6} pnl={:.6} cash={:.2}",
-                ts.to_rfc3339(),
-                self.trade_resolution,
+            let kind: String = match pos.side {
+                Side::Long => "EXIT_LONG".green().bold().to_string(),
+                Side::Short => "EXIT_SHORT".red().bold().to_string(),
+            };
+            let pnl_s: String = if pnl >= 0.0 {
+                format!("{pnl:.6}").green().to_string()
+            } else {
+                format!("{pnl:.6}").red().to_string()
+            };
+            let msg = format!(
+                "{} {} res={} entry={:.6} exit={:.6} qty={:.6} pnl={} cash={:.2}",
+                "[trade]".bright_black(),
+                kind,
+                self.trade_resolution.cyan(),
                 pos.entry_price,
                 price,
                 pos.qty,
-                pnl,
+                pnl_s,
                 self.cash
             );
+            info!(ts = %ts.to_rfc3339(), "{msg}");
         }
         let _ = ts;
         Ok(())
@@ -186,17 +229,18 @@ impl BacktestEngine {
                     .as_ref()
                     .map(|p| format!("{:?} qty={:.6} entry={:.6}", p.side, p.qty, p.entry_price))
                     .unwrap_or_else(|| "flat".to_string());
-                eprintln!(
-                    "[bar][{}][trade_res={}]\tclose={:.6}\tcash={:.2}->{:.2}\teq={:.2}->{:.2}\t{}",
-                    bar.ts.to_rfc3339(),
-                    self.log.trade_resolution,
-                    bar.close,
-                    before_cash,
-                    ctx.cash,
-                    before_equity,
-                    ctx.equity(bar.close),
-                    pos_desc
+                let msg = format!(
+                    "{} res={} close={} cash={}→{} eq={}→{} {}",
+                    "[bar]".bright_black(),
+                    self.log.trade_resolution.cyan(),
+                    format!("{:.6}", bar.close).white().bold(),
+                    format!("{before_cash:.2}").yellow(),
+                    format!("{:.2}", ctx.cash).yellow(),
+                    format!("{before_equity:.2}").magenta(),
+                    format!("{:.2}", ctx.equity(bar.close)).magenta(),
+                    pos_desc.bright_black(),
                 );
+                info!(ts = %bar.ts.to_rfc3339(), "{msg}");
             }
 
         }

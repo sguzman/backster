@@ -1,6 +1,8 @@
 use anyhow::Result;
 use rand::Rng;
 use rand_distr::{Distribution, Normal, StudentT};
+use owo_colors::OwoColorize;
+use tracing::info;
 
 use crate::backtest::{BacktestContext, Bar};
 use crate::wolfram::data::RollingFitRow;
@@ -56,29 +58,16 @@ impl Strategy for RollingPvaluePredictor {
         let bar_index = self.idx;
         let is_last_bar = bar_index + 1 >= self.fits.len();
 
-        if self.force_trade_each_bar {
-            // Force exactly one completed trade per bar after the first:
-            // - If a position is open, exit it at this bar's close (realizes P&L for the last day).
-            // - Re-enter immediately at this bar's close, except on the final bar (so the test ends flat).
+        // If we're in a position, enforce the configured holding period (unless in forced daily mode,
+        // which closes positions every bar and re-opens based on the prediction).
+        if !self.force_trade_each_bar {
             if ctx.position.is_some() {
-                ctx.exit(bar.close, bar.ts)?;
-            }
-            if !is_last_bar && ctx.position.is_none() {
-                let qty = ctx.cash / bar.close;
-                if qty > 0.0 {
-                    ctx.enter_long(qty, bar.close, bar.ts)?;
+                self.holding_bars += 1;
+                if self.holding_bars >= self.holding_period_bars {
+                    ctx.exit(bar.close, bar.ts)?;
+                    self.holding_bars = 0;
                 }
             }
-            self.holding_bars = 0;
-        } else {
-        // If we're in a position, enforce the configured holding period.
-        if ctx.position.is_some() {
-            self.holding_bars += 1;
-            if self.holding_bars >= self.holding_period_bars {
-                ctx.exit(bar.close, bar.ts)?;
-                self.holding_bars = 0;
-            }
-        }
         }
 
         if self.idx >= self.fits.len() {
@@ -185,29 +174,51 @@ impl Strategy for RollingPvaluePredictor {
         let predicted_next_close = bar.close * predicted_log_return.exp();
 
         if ctx.log_strategy() {
-            eprintln!(
-                "[strategy][rolling_pvalue][{}]\tclose={:.6}\tpred_lr={:.8}\tpred_next={:.6}\ttw={:.6}\tW={:.8}\tN(p={:.4},x={:.6})\tT(p={:.4},x={:.6})\tL(p={:.4},x={:.6})\tLog(p={:.4},x={:.6})\tC(p={:.4},x={:.6})",
-                bar.ts.to_rfc3339(),
-                bar.close,
-                predicted_log_return,
-                predicted_next_close,
-                total_weight,
-                weighted,
-                fit.normal_p.unwrap_or(0.0),
-                normal_draw.unwrap_or(0.0),
-                fit.student_t_p.unwrap_or(0.0),
-                student_draw.unwrap_or(0.0),
-                fit.laplace_p.unwrap_or(0.0),
-                laplace_draw.unwrap_or(0.0),
-                fit.logistic_p.unwrap_or(0.0),
-                logistic_draw.unwrap_or(0.0),
-                fit.cauchy_p.unwrap_or(0.0),
-                cauchy_draw.unwrap_or(0.0),
+            let pred_lr_s: String = if predicted_log_return >= 0.0 {
+                format!("{predicted_log_return:.8}").green().to_string()
+            } else {
+                format!("{predicted_log_return:.8}").red().to_string()
+            };
+            let msg = format!(
+                "{} close={} pred_lr={} pred_next={} tw={} | {} {} {} {} {}",
+                "[strategy]".bright_black(),
+                format!("{:.6}", bar.close).white().bold(),
+                pred_lr_s,
+                format!("{:.6}", predicted_next_close).cyan().bold(),
+                format!("{total_weight:.6}").yellow(),
+                format!("N(p={:.4},x={:.6})", fit.normal_p.unwrap_or(0.0), normal_draw.unwrap_or(0.0)).blue(),
+                format!("T(p={:.4},x={:.6})", fit.student_t_p.unwrap_or(0.0), student_draw.unwrap_or(0.0)).magenta(),
+                format!("L(p={:.4},x={:.6})", fit.laplace_p.unwrap_or(0.0), laplace_draw.unwrap_or(0.0)).yellow(),
+                format!(
+                    "Log(p={:.4},x={:.6})",
+                    fit.logistic_p.unwrap_or(0.0),
+                    logistic_draw.unwrap_or(0.0)
+                )
+                .cyan(),
+                format!("C(p={:.4},x={:.6})", fit.cauchy_p.unwrap_or(0.0), cauchy_draw.unwrap_or(0.0)).red(),
             );
+            info!(ts = %bar.ts.to_rfc3339(), "{msg}");
         }
 
         if self.force_trade_each_bar {
-            // In force mode, entries/exits are handled above.
+            // Forced "daily" mode:
+            // - Close any open position at this bar's close (realizes P&L for the last day).
+            // - Open a new 1-bar position for the next day (except on the final bar),
+            //   selecting LONG vs SHORT based on the predicted next close.
+            if ctx.position.is_some() {
+                ctx.exit(bar.close, bar.ts)?;
+            }
+            if !is_last_bar && ctx.position.is_none() {
+                let qty = ctx.cash / bar.close;
+                if qty > 0.0 {
+                    if predicted_next_close >= bar.close {
+                        ctx.enter_long(qty, bar.close, bar.ts)?;
+                    } else {
+                        ctx.enter_short(qty, bar.close, bar.ts)?;
+                    }
+                }
+            }
+            self.holding_bars = 0;
             return Ok(());
         }
 

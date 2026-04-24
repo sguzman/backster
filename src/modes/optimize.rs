@@ -1,9 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::config::{DataConfig, OptimizerConfig};
 use crate::optimizer::{optimize_trades, OptimizeInput};
 use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_series;
+use tracing::info;
 
 pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
     if !cfg.know_future {
@@ -19,10 +20,7 @@ pub fn run_optimize(cfg: &OptimizerConfig, data: &DataConfig) -> Result<()> {
         allow_short: cfg.allow_short,
     })?;
 
-    println!(
-        "Optimizer done: final_cash={:.4}, trades_used={}",
-        res.final_cash, res.trades_used
-    );
+    info!(final_cash = res.final_cash, trades_used = res.trades_used, "Optimizer done");
 
     Ok(())
 }

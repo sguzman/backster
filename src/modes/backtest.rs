@@ -5,7 +5,8 @@ use crate::config::{BacktestConfig, DataConfig, StrategyConfig};
 use crate::strategy::Strategy;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
 use crate::wolfram::WolframSessionConfig;
-use crate::wolfram::data::{fetch_close_bars, fetch_close_bars_with_rolling_fit};
+use crate::wolfram::data::fetch_close_bars_with_rolling_fit;
+use tracing::info;
 
 pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
     let (bars, fits) = load_bars_and_features(cfg, data).context("Failed to load data/features")?;
@@ -51,15 +52,15 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
         0.0
     };
 
-    println!(
-        "Backtest done: seed={}, starting_cash={:.2}, trades={}, realized_pnl={:.4}, final_cash={:.4}, final_equity={:.4}, return_pct={:.4}%",
-        out.seed,
-        cfg.starting_cash,
-        out.stats.trades,
-        out.stats.realized_pnl,
-        out.cash,
-        final_equity,
-        pct_return
+    info!(
+        seed = out.seed,
+        starting_cash = cfg.starting_cash,
+        trades = out.stats.trades,
+        realized_pnl = out.stats.realized_pnl,
+        final_cash = out.cash,
+        final_equity = final_equity,
+        return_pct = pct_return,
+        "Backtest done"
     );
 
     Ok(())

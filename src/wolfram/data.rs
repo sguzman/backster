@@ -254,6 +254,16 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
     anyhow::ensure!(window == 0 || window >= 8, "window must be 0 or >= 8");
 
     let script_bytes = crate::cache::read_file_bytes(&math1_script_path())?;
+    let expr_is_probably_random = {
+        let e = expr.to_ascii_lowercase();
+        e.contains("random")
+            || e.contains("randomvari")
+            || e.contains("randomreal")
+            || e.contains("randominteger")
+            || e.contains("randomchoice")
+            || e.contains("randomvariat")
+            || e.contains("seedrandom")
+    };
     let cache_key = crate::cache::blake3_hex(&[
         b"wolfram_expr_v1",
         expr.as_bytes(),
@@ -261,17 +271,27 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         &script_bytes,
     ]);
 
-    let json = if let Some(hit) = crate::cache::read_cached_json(&cache_key)? {
-        hit
+    let json = if !expr_is_probably_random {
+        if let Some(hit) = crate::cache::read_cached_json(&cache_key)? {
+            hit
+        } else {
+            let mut sess = WolframSession::connect(cfg.clone())?;
+            sess.load_file(&math1_script_path())
+                .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+            let wl = format!("BacksterExprCloseAndFitJSON[{},{}]", wl_string_lit(expr), window);
+            let json = sess.eval_to_string_expr(&wl)?;
+            let json = unescape_wolfram_stringish(&json);
+            crate::cache::write_cached_json(&cache_key, &json)?;
+            json
+        }
     } else {
+        // Never cache expressions that probably include randomness.
         let mut sess = WolframSession::connect(cfg.clone())?;
         sess.load_file(&math1_script_path())
             .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
         let wl = format!("BacksterExprCloseAndFitJSON[{},{}]", wl_string_lit(expr), window);
         let json = sess.eval_to_string_expr(&wl)?;
-        let json = unescape_wolfram_stringish(&json);
-        crate::cache::write_cached_json(&cache_key, &json)?;
-        json
+        unescape_wolfram_stringish(&json)
     };
 
     #[derive(serde::Deserialize)]

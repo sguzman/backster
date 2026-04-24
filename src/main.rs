@@ -11,6 +11,8 @@ mod stats;
 mod cache;
 
 fn main() -> anyhow::Result<()> {
+    init_tracing();
+
     let cfg_path = parse_args_for_config_path()?;
     let cfg_str = std::fs::read_to_string(&cfg_path)?;
     let cfg: crate::config::AppConfig = toml::from_str(&cfg_str)?;
@@ -29,6 +31,20 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .compact()
+        .without_time()
+        .with_env_filter(filter)
+        .with_ansi(true)
+        .with_target(false)
+        .with_writer(std::io::stdout)
+        .init();
 }
 
 fn parse_args_for_config_path() -> anyhow::Result<std::path::PathBuf> {
