@@ -41,7 +41,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             trade_resolution: cfg.trade_resolution.clone(),
         },
     );
-    let out = engine.run(&bars, strategy.as_mut())?;
+    let out = engine.run(&bars, strategy.as_mut(), cfg.seed)?;
     let last_close = bars.last().map(|b| b.close).unwrap_or(0.0);
 
     println!(

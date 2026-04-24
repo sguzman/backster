@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use rand::SeedableRng;
 
 use crate::strategy::Strategy;
 
@@ -39,22 +40,28 @@ pub struct BacktestContext {
     pub stats: BacktestStats,
     log_trades: bool,
     trade_resolution: String,
+    rng: rand_chacha::ChaCha8Rng,
 }
 
 impl BacktestContext {
-    pub fn new(starting_cash: f64) -> Self {
+    pub fn new(starting_cash: f64, seed: u64) -> Self {
         Self {
             cash: starting_cash,
             position: None,
             stats: BacktestStats::default(),
             log_trades: false,
             trade_resolution: "bar".to_string(),
+            rng: rand_chacha::ChaCha8Rng::seed_from_u64(seed),
         }
     }
 
     pub fn set_trade_logging(&mut self, enabled: bool, trade_resolution: String) {
         self.log_trades = enabled;
         self.trade_resolution = trade_resolution;
+    }
+
+    pub fn rng(&mut self) -> &mut rand_chacha::ChaCha8Rng {
+        &mut self.rng
     }
 
     pub fn enter_long(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
@@ -135,8 +142,13 @@ impl BacktestEngine {
         Self { starting_cash, log }
     }
 
-    pub fn run(&self, bars: &[Bar], strategy: &mut dyn Strategy) -> Result<BacktestContext> {
-        let mut ctx = BacktestContext::new(self.starting_cash);
+    pub fn run(
+        &self,
+        bars: &[Bar],
+        strategy: &mut dyn Strategy,
+        seed: u64,
+    ) -> Result<BacktestContext> {
+        let mut ctx = BacktestContext::new(self.starting_cash, seed);
         ctx.set_trade_logging(self.log.log_trades, self.log.trade_resolution.clone());
         strategy.on_start(&mut ctx)?;
 

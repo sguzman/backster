@@ -63,15 +63,21 @@ fn unescape_wolfram_stringish(s: &str) -> String {
 pub struct RollingFitRow {
     pub ts: DateTime<Utc>,
     pub normal_p: Option<f64>,
-    pub normal_value: Option<f64>,
+    pub normal_mu: Option<f64>,
+    pub normal_sigma: Option<f64>,
     pub student_t_p: Option<f64>,
-    pub student_t_value: Option<f64>,
+    pub student_t_nu: Option<f64>,
+    pub student_t_mu: Option<f64>,
+    pub student_t_sigma: Option<f64>,
     pub laplace_p: Option<f64>,
-    pub laplace_value: Option<f64>,
+    pub laplace_mu: Option<f64>,
+    pub laplace_sigma: Option<f64>,
     pub logistic_p: Option<f64>,
-    pub logistic_value: Option<f64>,
+    pub logistic_mu: Option<f64>,
+    pub logistic_beta: Option<f64>,
     pub cauchy_p: Option<f64>,
-    pub cauchy_value: Option<f64>,
+    pub cauchy_alpha: Option<f64>,
+    pub cauchy_beta: Option<f64>,
 }
 
 pub fn fetch_close_series(
@@ -129,19 +135,37 @@ pub fn fetch_close_bars_with_rolling_fit(
     );
     anyhow::ensure!(window == 0 || window >= 8, "window must be 0 or >= 8");
 
-    let mut sess = WolframSession::connect(cfg.clone())?;
-    sess.load_file(&math1_script_path())
-        .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
-    let wl = format!(
-        "BacksterFinancialDataCloseAndFitJSON[{},{},{},{},{}]",
-        wl_string_lit(symbol),
-        wl_string_lit(start),
-        wl_string_lit(end),
-        wl_string_lit(field),
-        window
-    );
-    let json = sess.eval_to_string_expr(&wl)?;
-    let json = unescape_wolfram_stringish(&json);
+    let script_bytes = crate::cache::read_file_bytes(&math1_script_path())?;
+    let cache_key = crate::cache::blake3_hex(&[
+        b"wolfram_financial_v1",
+        symbol.as_bytes(),
+        start.as_bytes(),
+        end.as_bytes(),
+        field.as_bytes(),
+        resolution.as_bytes(),
+        window.to_string().as_bytes(),
+        &script_bytes,
+    ]);
+
+    let json = if let Some(hit) = crate::cache::read_cached_json(&cache_key)? {
+        hit
+    } else {
+        let mut sess = WolframSession::connect(cfg.clone())?;
+        sess.load_file(&math1_script_path())
+            .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+        let wl = format!(
+            "BacksterFinancialDataCloseAndFitJSON[{},{},{},{},{}]",
+            wl_string_lit(symbol),
+            wl_string_lit(start),
+            wl_string_lit(end),
+            wl_string_lit(field),
+            window
+        );
+        let json = sess.eval_to_string_expr(&wl)?;
+        let json = unescape_wolfram_stringish(&json);
+        crate::cache::write_cached_json(&cache_key, &json)?;
+        json
+    };
 
     #[derive(serde::Deserialize)]
     struct Payload {
@@ -178,10 +202,16 @@ pub fn fetch_close_bars_with_rolling_fit(
 
     let mut fits: Vec<Option<RollingFitRow>> = vec![None; bars.len()];
     for row in payload.fit {
-        // [ts_ms, pN, vN, pT, vT, pL, vL, pLog, vLog, pC, vC]
+        // [ts_ms,
+        //   pN, muN, sigmaN,
+        //   pT, nuT, muT, sigmaT,
+        //   pL, muL, sigmaL,
+        //   pLog, muLog, betaLog,
+        //   pC, alphaC, betaC
+        // ]
         anyhow::ensure!(
-            row.len() == 11,
-            "Bad fit row length: expected 11, got {}",
+            row.len() == 17,
+            "Bad fit row length: expected 17, got {}",
             row.len()
         );
         let Some(ts_ms_f) = row[0] else {
@@ -195,15 +225,21 @@ pub fn fetch_close_bars_with_rolling_fit(
         fits[idx] = Some(RollingFitRow {
             ts,
             normal_p: row[1],
-            normal_value: row[2],
-            student_t_p: row[3],
-            student_t_value: row[4],
-            laplace_p: row[5],
-            laplace_value: row[6],
-            logistic_p: row[7],
-            logistic_value: row[8],
-            cauchy_p: row[9],
-            cauchy_value: row[10],
+            normal_mu: row[2],
+            normal_sigma: row[3],
+            student_t_p: row[4],
+            student_t_nu: row[5],
+            student_t_mu: row[6],
+            student_t_sigma: row[7],
+            laplace_p: row[8],
+            laplace_mu: row[9],
+            laplace_sigma: row[10],
+            logistic_p: row[11],
+            logistic_mu: row[12],
+            logistic_beta: row[13],
+            cauchy_p: row[14],
+            cauchy_alpha: row[15],
+            cauchy_beta: row[16],
         });
     }
 
@@ -217,16 +253,26 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
 ) -> Result<(Vec<Bar>, Vec<Option<RollingFitRow>>)> {
     anyhow::ensure!(window == 0 || window >= 8, "window must be 0 or >= 8");
 
-    let mut sess = WolframSession::connect(cfg.clone())?;
-    sess.load_file(&math1_script_path())
-        .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
-    let wl = format!(
-        "BacksterExprCloseAndFitJSON[{},{}]",
-        wl_string_lit(expr),
-        window
-    );
-    let json = sess.eval_to_string_expr(&wl)?;
-    let json = unescape_wolfram_stringish(&json);
+    let script_bytes = crate::cache::read_file_bytes(&math1_script_path())?;
+    let cache_key = crate::cache::blake3_hex(&[
+        b"wolfram_expr_v1",
+        expr.as_bytes(),
+        window.to_string().as_bytes(),
+        &script_bytes,
+    ]);
+
+    let json = if let Some(hit) = crate::cache::read_cached_json(&cache_key)? {
+        hit
+    } else {
+        let mut sess = WolframSession::connect(cfg.clone())?;
+        sess.load_file(&math1_script_path())
+            .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+        let wl = format!("BacksterExprCloseAndFitJSON[{},{}]", wl_string_lit(expr), window);
+        let json = sess.eval_to_string_expr(&wl)?;
+        let json = unescape_wolfram_stringish(&json);
+        crate::cache::write_cached_json(&cache_key, &json)?;
+        json
+    };
 
     #[derive(serde::Deserialize)]
     struct Payload {
@@ -264,8 +310,8 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
     let mut fits: Vec<Option<RollingFitRow>> = vec![None; bars.len()];
     for row in payload.fit {
         anyhow::ensure!(
-            row.len() == 11,
-            "Bad fit row length: expected 11, got {}",
+            row.len() == 17,
+            "Bad fit row length: expected 17, got {}",
             row.len()
         );
         let Some(ts_ms_f) = row[0] else {
@@ -279,15 +325,21 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         fits[idx] = Some(RollingFitRow {
             ts,
             normal_p: row[1],
-            normal_value: row[2],
-            student_t_p: row[3],
-            student_t_value: row[4],
-            laplace_p: row[5],
-            laplace_value: row[6],
-            logistic_p: row[7],
-            logistic_value: row[8],
-            cauchy_p: row[9],
-            cauchy_value: row[10],
+            normal_mu: row[2],
+            normal_sigma: row[3],
+            student_t_p: row[4],
+            student_t_nu: row[5],
+            student_t_mu: row[6],
+            student_t_sigma: row[7],
+            laplace_p: row[8],
+            laplace_mu: row[9],
+            laplace_sigma: row[10],
+            logistic_p: row[11],
+            logistic_mu: row[12],
+            logistic_beta: row[13],
+            cauchy_p: row[14],
+            cauchy_alpha: row[15],
+            cauchy_beta: row[16],
         });
     }
 

@@ -1,4 +1,6 @@
 use anyhow::Result;
+use rand::Rng;
+use rand_distr::{Distribution, Normal, StudentT};
 
 use crate::backtest::{BacktestContext, Bar};
 use crate::wolfram::data::RollingFitRow;
@@ -95,13 +97,8 @@ impl Strategy for RollingPvaluePredictor {
         // (random draws from the fitted log-return distribution) weighted by p-values.
         let mut total_weight = 0.0;
         let mut weighted = 0.0;
-        for (p, v) in [
-            (fit.normal_p, fit.normal_value),
-            (fit.student_t_p, fit.student_t_value),
-            (fit.laplace_p, fit.laplace_value),
-            (fit.logistic_p, fit.logistic_value),
-            (fit.cauchy_p, fit.cauchy_value),
-        ] {
+
+        let mut sample = |p: Option<f64>, v: Option<f64>| {
             let p = p
                 .filter(|p| p.is_finite())
                 .map(|p| p.max(0.0))
@@ -109,7 +106,71 @@ impl Strategy for RollingPvaluePredictor {
             let v = v.filter(|v| v.is_finite()).unwrap_or(0.0);
             total_weight += p;
             weighted += p * v;
-        }
+        };
+
+        let rng = ctx.rng();
+
+        // Normal
+        let normal_draw = match (fit.normal_mu, fit.normal_sigma) {
+            (Some(mu), Some(sigma)) if sigma.is_finite() && sigma > 0.0 && mu.is_finite() => {
+                Normal::new(mu, sigma).ok().map(|d| d.sample(rng))
+            }
+            _ => None,
+        };
+        sample(fit.normal_p, normal_draw);
+
+        // StudentT
+        let student_draw = match (fit.student_t_nu, fit.student_t_mu, fit.student_t_sigma) {
+            (Some(nu), Some(mu), Some(sigma))
+                if nu.is_finite()
+                    && nu > 0.0
+                    && mu.is_finite()
+                    && sigma.is_finite()
+                    && sigma > 0.0 =>
+            {
+                StudentT::new(nu)
+                    .ok()
+                    .map(|d| mu + sigma * d.sample(rng))
+            }
+            _ => None,
+        };
+        sample(fit.student_t_p, student_draw);
+
+        // Laplace: inverse CDF
+        let laplace_draw = match (fit.laplace_mu, fit.laplace_sigma) {
+            (Some(mu), Some(b)) if mu.is_finite() && b.is_finite() && b > 0.0 => {
+                let u: f64 = rng.random_range(0.0..1.0);
+                let x = if u < 0.5 {
+                    mu + b * (2.0 * u).ln()
+                } else {
+                    mu - b * (2.0 * (1.0 - u)).ln()
+                };
+                Some(x)
+            }
+            _ => None,
+        };
+        sample(fit.laplace_p, laplace_draw);
+
+        // Logistic: inverse CDF
+        let logistic_draw = match (fit.logistic_mu, fit.logistic_beta) {
+            (Some(mu), Some(s)) if mu.is_finite() && s.is_finite() && s > 0.0 => {
+                let u: f64 = rng.random_range(0.0..1.0);
+                Some(mu + s * (u / (1.0 - u)).ln())
+            }
+            _ => None,
+        };
+        sample(fit.logistic_p, logistic_draw);
+
+        // Cauchy
+        let cauchy_draw = match (fit.cauchy_alpha, fit.cauchy_beta) {
+            (Some(x0), Some(gamma)) if x0.is_finite() && gamma.is_finite() && gamma > 0.0 => {
+                let u: f64 = rng.random_range(0.0..1.0);
+                Some(x0 + gamma * (std::f64::consts::PI * (u - 0.5)).tan())
+            }
+            _ => None,
+        };
+        sample(fit.cauchy_p, cauchy_draw);
+
         if total_weight < self.min_total_weight {
             return Ok(());
         }

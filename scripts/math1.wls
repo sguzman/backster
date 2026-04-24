@@ -87,31 +87,40 @@ backsterCloseRows[data_] :=
   ];
 
 backsterRollingFitRows[data_, distFamilies_List, windowSize_Integer?Positive] :=
-  Module[{parsed, dates, rets, windows, safeVal, rows},
+  Module[{parsed, dates, rets, windows, safeParams, padParams, rows},
     parsed = getReturnSeriesFromData[data];
     dates = parsed["Dates"];
     rets = parsed["Returns"];
     If[windowSize > Length[rets], Return[{}]];
     windows = makeRollingWindows[dates, rets, windowSize];
 
-    (* Return a single random draw from the fitted distribution.
-       This matches the "yield a random value from each distro" requirement. *)
-    safeVal[fit_] := Quiet@Check[First@RandomVariate[fit, 1], Missing["NotAvailable"]];
+    (* Deterministic: return numeric distribution parameters for Rust-side sampling.
+       This is safe to cache. *)
+    safeParams[fit_] := Quiet@Check[Rest[List @@ fit], Missing["NotAvailable"]];
+    padParams[p_, n_] := If[ListQ[p], PadRight[p, n, Null], ConstantArray[Null, n]];
 
     rows =
       Table[
-        Module[{wdata, end, fits, ps0, vs0, ps, vs},
+        Module[{wdata, end, fits, ps0, params0, ps, params},
           wdata = windows[[i, "Data"]];
           end = windows[[i, "EndDate"]];
           fits = safeEstimatedDistribution[wdata, #] & /@ distFamilies;
 
           ps0 = If[# === $Failed, Missing["FitFailed"], safePValue[wdata, #]] & /@ fits;
-          vs0 = If[# === $Failed, Missing["FitFailed"], safeVal[#]] & /@ fits;
+          params0 = If[# === $Failed, Missing["FitFailed"], safeParams[#]] & /@ fits;
 
           ps = backsterMaybeNumber /@ ps0;
-          vs = backsterMaybeNumber /@ vs0;
+          params = (If[ListQ[#], backsterMaybeNumber /@ #, #] &) /@ params0;
 
-          Flatten[{1000*UnixTime[end], Riffle[ps, vs]}]
+          (* Fixed layout (17 values). Always stable length, using Null for missing. *)
+          Join[
+            {1000*UnixTime[end]},
+            {ps[[1]]}, padParams[params[[1]], 2],
+            {ps[[2]]}, padParams[params[[2]], 3],
+            {ps[[3]]}, padParams[params[[3]], 2],
+            {ps[[4]]}, padParams[params[[4]], 2],
+            {ps[[5]]}, padParams[params[[5]], 2]
+          ]
         ],
         {i, Length[windows]}
       ];

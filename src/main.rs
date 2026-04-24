@@ -8,6 +8,7 @@ mod config;
 mod modes;
 mod optimizer;
 mod stats;
+mod cache;
 
 fn main() -> anyhow::Result<()> {
     let cfg_path = parse_args_for_config_path()?;
