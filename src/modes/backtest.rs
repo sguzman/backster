@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use crate::backtest::{BacktestEngine, BacktestLogConfig, Bar};
 use crate::config::{BacktestConfig, DataConfig, StrategyConfig};
 use crate::strategy::Strategy;
+use crate::strategy::normal_noise::NormalNoiseInvestor;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
 use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_bars_with_rolling_fit;
@@ -28,6 +29,14 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
             *force_trade_each_bar,
             fits,
         )),
+        StrategyConfig::NormalNoiseInvestor {
+            max_abs_fraction,
+            min_trade_cash,
+        } => Box::new(NormalNoiseInvestor::new(
+            *max_abs_fraction,
+            *min_trade_cash,
+            bars.len(),
+        )?),
     };
 
     if bars.is_empty() {
@@ -95,6 +104,15 @@ fn load_bars_and_features(
                     resolution,
                     cfg.window,
                 ),
+                StrategyConfig::NormalNoiseInvestor { .. } => fetch_close_bars_with_rolling_fit(
+                    &kcfg,
+                    symbol,
+                    start,
+                    end,
+                    field,
+                    resolution,
+                    0,
+                ),
             }
         }
         DataConfig::WolframExpr { expr, kernel } => {
@@ -108,6 +126,9 @@ fn load_bars_and_features(
                     expr,
                     cfg.window,
                 ),
+                StrategyConfig::NormalNoiseInvestor { .. } => {
+                    crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(&kcfg, expr, 0)
+                }
             }
         }
     }

@@ -1,0 +1,18 @@
+mode = "backtest"
+
+[data]
+source = "wolfram_expr"
+expr = "TimeSeries[Table[{DatePlus[DateObject[{2020, 1, 1}], i], 100.0 + 0.1 i + Sin[i/3.0]}, {i, 0, 60}]]"
+
+[backtest]
+starting_cash = 100000.0
+window = 0
+trade_resolution = "day"
+log_bars = true
+log_trades = true
+
+[backtest.strategy]
+kind = "normal_noise_investor"
+max_abs_fraction = 1.0
+min_trade_cash = 100.0
+

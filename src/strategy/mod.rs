@@ -1,6 +1,7 @@
 use crate::backtest::{BacktestContext, Bar};
 
 pub mod rolling_pvalue;
+pub mod normal_noise;
 
 pub trait Strategy {
     fn name(&self) -> &'static str;

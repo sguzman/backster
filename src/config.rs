@@ -96,10 +96,28 @@ pub enum StrategyConfig {
         #[serde(default)]
         force_trade_each_bar: bool,
     },
+    /// Each bar/day: draw `z ~ Normal(0, 1)` and invest `|z|` fraction of cash (clamped),
+    /// going long if `z >= 0` and short if `z < 0`.
+    NormalNoiseInvestor {
+        /// Clamp the absolute fraction of cash invested each day. Must be in (0, 1].
+        #[serde(default = "default_max_abs_fraction")]
+        max_abs_fraction: f64,
+        /// Skip entries when the invested cash would be below this threshold.
+        #[serde(default = "default_min_trade_cash")]
+        min_trade_cash: f64,
+    },
 }
 
 fn default_min_total_weight() -> f64 {
     0.0
+}
+
+fn default_max_abs_fraction() -> f64 {
+    1.0
+}
+
+fn default_min_trade_cash() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
