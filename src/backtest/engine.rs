@@ -96,20 +96,84 @@ impl BacktestContext {
 
 pub struct BacktestEngine {
     starting_cash: f64,
+    log: BacktestLogConfig,
 }
 
 impl BacktestEngine {
-    pub fn new(starting_cash: f64) -> Self {
-        Self { starting_cash }
+    pub fn new(starting_cash: f64, log: BacktestLogConfig) -> Self {
+        Self { starting_cash, log }
     }
 
     pub fn run(&self, bars: &[Bar], strategy: &mut dyn Strategy) -> Result<BacktestContext> {
         let mut ctx = BacktestContext::new(self.starting_cash);
         strategy.on_start(&mut ctx)?;
+
         for bar in bars {
+            let before_cash = ctx.cash;
+            let before_equity = ctx.equity(bar.close);
+            let before_pos = ctx.position.clone();
+
             strategy.on_bar(&mut ctx, bar)?;
+
+            if self.log.log_trades {
+                match (&before_pos, &ctx.position) {
+                    (None, Some(pos)) => {
+                        eprintln!(
+                            "[trade][enter][{}][{:?}] qty={:.6} price={:.6} cash={:.2} equity={:.2}",
+                            bar.ts.to_rfc3339(),
+                            pos.side,
+                            pos.qty,
+                            pos.entry_price,
+                            ctx.cash,
+                            ctx.equity(bar.close)
+                        );
+                    }
+                    (Some(pos), None) => {
+                        // Exit: realized pnl is accumulated in ctx.stats.
+                        let after_equity = ctx.equity(bar.close);
+                        eprintln!(
+                            "[trade][exit][{}][{:?}] entry_price={:.6} exit_price={:.6} qty={:.6} cash={:.2} equity={:.2}",
+                            bar.ts.to_rfc3339(),
+                            pos.side,
+                            pos.entry_price,
+                            bar.close,
+                            pos.qty,
+                            ctx.cash,
+                            after_equity
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
+            if self.log.log_bars {
+                let pos_desc = ctx
+                    .position
+                    .as_ref()
+                    .map(|p| format!("{:?} qty={:.6} entry={:.6}", p.side, p.qty, p.entry_price))
+                    .unwrap_or_else(|| "flat".to_string());
+                eprintln!(
+                    "[bar][{}][trade_res={}]\tclose={:.6}\tcash={:.2}->{:.2}\teq={:.2}->{:.2}\t{}",
+                    bar.ts.to_rfc3339(),
+                    self.log.trade_resolution,
+                    bar.close,
+                    before_cash,
+                    ctx.cash,
+                    before_equity,
+                    ctx.equity(bar.close),
+                    pos_desc
+                );
+            }
+
         }
         strategy.on_finish(&mut ctx)?;
         Ok(ctx)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct BacktestLogConfig {
+    pub log_bars: bool,
+    pub log_trades: bool,
+    pub trade_resolution: String,
 }

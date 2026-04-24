@@ -54,7 +54,31 @@ fn default_resolution() -> String {
 pub struct BacktestConfig {
     pub starting_cash: f64,
     pub window: usize,
+    #[serde(default = "default_trade_resolution")]
+    pub trade_resolution: String,
+    #[serde(default = "default_holding_period_bars")]
+    pub holding_period_bars: usize,
+    #[serde(default = "default_log_bars")]
+    pub log_bars: bool,
+    #[serde(default = "default_log_trades")]
+    pub log_trades: bool,
     pub strategy: StrategyConfig,
+}
+
+fn default_trade_resolution() -> String {
+    "bar".to_string()
+}
+
+fn default_holding_period_bars() -> usize {
+    1
+}
+
+fn default_log_bars() -> bool {
+    true
+}
+
+fn default_log_trades() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

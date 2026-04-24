@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::backtest::{BacktestEngine, Bar};
+use crate::backtest::{BacktestEngine, BacktestLogConfig, Bar};
 use crate::config::{BacktestConfig, DataConfig, StrategyConfig};
 use crate::strategy::Strategy;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
@@ -18,6 +18,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
             min_total_weight,
         } => Box::new(RollingPvaluePredictor::new(
             cfg.window,
+            cfg.holding_period_bars,
             *enter_threshold,
             *exit_threshold,
             *normalize_weights,
@@ -30,7 +31,14 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig) -> Result<()> {
         anyhow::bail!("No bars loaded");
     }
 
-    let engine = BacktestEngine::new(cfg.starting_cash);
+    let engine = BacktestEngine::new(
+        cfg.starting_cash,
+        BacktestLogConfig {
+            log_bars: cfg.log_bars,
+            log_trades: cfg.log_trades,
+            trade_resolution: cfg.trade_resolution.clone(),
+        },
+    );
     let out = engine.run(&bars, strategy.as_mut())?;
     let last_close = bars.last().map(|b| b.close).unwrap_or(0.0);
 

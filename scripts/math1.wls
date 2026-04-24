@@ -94,7 +94,9 @@ backsterRollingFitRows[data_, distFamilies_List, windowSize_Integer?Positive] :=
     If[windowSize > Length[rets], Return[{}]];
     windows = makeRollingWindows[dates, rets, windowSize];
 
-    safeVal[fit_] := Quiet@Check[Mean[fit], Missing["NotAvailable"]];
+    (* Return a single random draw from the fitted distribution.
+       This matches the "yield a random value from each distro" requirement. *)
+    safeVal[fit_] := Quiet@Check[First@RandomVariate[fit, 1], Missing["NotAvailable"]];
 
     rows =
       Table[
@@ -174,4 +176,3 @@ BacksterExprCloseAndFitJSON[
 
     ExportString[<|"close" -> closeRows, "fit" -> fitRows|>, "JSON"]
   ];
-
