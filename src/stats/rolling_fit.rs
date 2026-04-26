@@ -1,6 +1,6 @@
 use anyhow::Result;
 use statrs::distribution::{Cauchy, ContinuousCDF, Laplace, Normal, StudentsT};
-use statrs::statistics::Median;
+use rando::stats::{mean, std_dev, median, kurtosis, quantile};
 
 use crate::stats::ks::ks_p_value;
 
@@ -102,7 +102,8 @@ fn fit_family(sample: &[f64], fam: DistFamily) -> Result<Option<(f64, f64)>> {
 
     match fam {
         DistFamily::Normal => {
-            let (mu, sigma) = mean_std(&xs);
+            let mu = mean(&xs);
+            let sigma = std_dev(&xs);
             if !(sigma.is_finite() && sigma > 0.0) {
                 return Ok(None);
             }
@@ -112,11 +113,12 @@ fn fit_family(sample: &[f64], fam: DistFamily) -> Result<Option<(f64, f64)>> {
         }
         DistFamily::StudentsT => {
             // Heuristic df estimator from sample excess kurtosis (clamped).
-            let (mu, sigma) = mean_std(&xs);
+            let mu = mean(&xs);
+            let sigma = std_dev(&xs);
             if !(sigma.is_finite() && sigma > 0.0) {
                 return Ok(None);
             }
-            let ex_kurt = excess_kurtosis(&xs, mu, sigma);
+            let ex_kurt = kurtosis(&xs) - 3.0;
             let df = if ex_kurt.is_finite() && ex_kurt > 1e-9 {
                 (6.0 / ex_kurt + 4.0).clamp(2.5, 80.0)
             } else {
@@ -141,7 +143,8 @@ fn fit_family(sample: &[f64], fam: DistFamily) -> Result<Option<(f64, f64)>> {
             Ok(Some((p, med)))
         }
         DistFamily::Logistic => {
-            let (mu, sigma) = mean_std(&xs);
+            let mu = mean(&xs);
+            let sigma = std_dev(&xs);
             if !(sigma.is_finite() && sigma > 0.0) {
                 return Ok(None);
             }
@@ -155,8 +158,8 @@ fn fit_family(sample: &[f64], fam: DistFamily) -> Result<Option<(f64, f64)>> {
         }
         DistFamily::Cauchy => {
             let med = median(&xs);
-            let q1 = quantile_sorted(&xs, 0.25);
-            let q3 = quantile_sorted(&xs, 0.75);
+            let q1 = quantile(&xs, 0.25);
+            let q3 = quantile(&xs, 0.75);
             let gamma = (q3 - q1).abs() / 2.0;
             if !(gamma.is_finite() && gamma > 0.0) {
                 return Ok(None);
@@ -169,56 +172,6 @@ fn fit_family(sample: &[f64], fam: DistFamily) -> Result<Option<(f64, f64)>> {
     }
 }
 
-fn mean_std(xs: &[f64]) -> (f64, f64) {
-    let n = xs.len() as f64;
-    let mean = xs.iter().sum::<f64>() / n;
-    let var = xs
-        .iter()
-        .map(|x| {
-            let d = x - mean;
-            d * d
-        })
-        .sum::<f64>()
-        / (n - 1.0).max(1.0);
-    (mean, var.sqrt())
-}
-
-fn median(xs: &[f64]) -> f64 {
-    let mut v = xs.to_vec();
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    quantile_sorted(&v, 0.5)
-}
-
-fn quantile_sorted(sorted: &[f64], q: f64) -> f64 {
-    if sorted.is_empty() {
-        return f64::NAN;
-    }
-    let q = q.clamp(0.0, 1.0);
-    let pos = q * (sorted.len() - 1) as f64;
-    let lo = pos.floor() as usize;
-    let hi = pos.ceil() as usize;
-    if lo == hi {
-        return sorted[lo];
-    }
-    let t = pos - lo as f64;
-    sorted[lo] * (1.0 - t) + sorted[hi] * t
-}
-
-fn excess_kurtosis(xs: &[f64], mu: f64, sigma: f64) -> f64 {
-    if sigma <= 0.0 || !sigma.is_finite() {
-        return f64::NAN;
-    }
-    let n = xs.len() as f64;
-    let m4 = xs
-        .iter()
-        .map(|x| {
-            let z = (x - mu) / sigma;
-            z.powi(4)
-        })
-        .sum::<f64>()
-        / n;
-    m4 - 3.0
-}
 
 #[derive(Debug, Clone, Copy)]
 struct Logistic {
