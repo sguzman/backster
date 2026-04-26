@@ -1,0 +1,23 @@
+mode = "backtest"
+
+[data]
+source = "wolfram_financial"
+symbol = "SP500"
+start = "2020-01-01"
+end = "2023-01-01"
+field = "Close"
+resolution = "day"
+
+[backtest]
+starting_cash = 100000.0
+window = 60
+trade_resolution = "day"
+
+[backtest.strategy]
+kind = "ad_hoc_distribution_predictor"
+enter_threshold = 0.0001
+exit_threshold = 0.0
+normalize_weights = true
+min_total_weight = 0.0
+force_trade_each_bar = true
+use_ad_test = false
