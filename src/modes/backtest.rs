@@ -5,6 +5,7 @@ use crate::config::{BacktestConfig, DataConfig, StrategyConfig};
 use crate::strategy::Strategy;
 use crate::strategy::normal_noise::NormalNoiseInvestor;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
+use crate::strategy::adhoc_dist::AdHocDistributionPredictor;
 use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_bars_with_rolling_fit;
 use tracing::info;
@@ -37,6 +38,23 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
             *min_trade_cash,
             bars.len(),
         )?),
+        StrategyConfig::AdHocDistributionPredictor {
+            enter_threshold,
+            exit_threshold,
+            normalize_weights,
+            min_total_weight,
+            force_trade_each_bar,
+            use_ad_test,
+        } => Box::new(AdHocDistributionPredictor::new(
+            cfg.window,
+            cfg.holding_period_bars,
+            *enter_threshold,
+            *exit_threshold,
+            *normalize_weights,
+            *min_total_weight,
+            *force_trade_each_bar,
+            *use_ad_test,
+        )),
     };
 
     if bars.is_empty() {
@@ -104,7 +122,7 @@ fn load_bars_and_features(
                     resolution,
                     cfg.window,
                 ),
-                StrategyConfig::NormalNoiseInvestor { .. } => fetch_close_bars_with_rolling_fit(
+                StrategyConfig::NormalNoiseInvestor { .. } | StrategyConfig::AdHocDistributionPredictor { .. } => fetch_close_bars_with_rolling_fit(
                     &kcfg,
                     symbol,
                     start,
@@ -126,7 +144,7 @@ fn load_bars_and_features(
                     expr,
                     cfg.window,
                 ),
-                StrategyConfig::NormalNoiseInvestor { .. } => {
+                StrategyConfig::NormalNoiseInvestor { .. } | StrategyConfig::AdHocDistributionPredictor { .. } => {
                     crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(&kcfg, expr, 0)
                 }
             }

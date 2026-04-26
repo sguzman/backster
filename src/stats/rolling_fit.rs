@@ -1,5 +1,6 @@
 use anyhow::Result;
 use statrs::distribution::{Cauchy, ContinuousCDF, Laplace, Normal, StudentsT};
+use statrs::statistics::Median;
 use rando::stats::{mean, std_dev, median, kurtosis, quantile};
 
 use crate::stats::ks::ks_p_value;

@@ -106,6 +106,18 @@ pub enum StrategyConfig {
         #[serde(default = "default_min_trade_cash")]
         min_trade_cash: f64,
     },
+    AdHocDistributionPredictor {
+        enter_threshold: f64,
+        exit_threshold: f64,
+        #[serde(default)]
+        normalize_weights: bool,
+        #[serde(default = "default_min_total_weight")]
+        min_total_weight: f64,
+        #[serde(default)]
+        force_trade_each_bar: bool,
+        #[serde(default)]
+        use_ad_test: bool,
+    },
 }
 
 fn default_min_total_weight() -> f64 {
