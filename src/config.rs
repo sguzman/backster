@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -130,6 +130,13 @@ pub enum StrategyConfig {
         #[serde(default)]
         use_ad_test: bool,
     },
+    FlexiblePipelinePredictor {
+        enter_threshold: f64,
+        exit_threshold: f64,
+        #[serde(default)]
+        force_trade_each_bar: bool,
+        pipeline: Vec<PipelineStep>,
+    },
 }
 
 fn default_min_total_weight() -> f64 {
@@ -138,6 +145,64 @@ fn default_min_total_weight() -> f64 {
 
 fn default_max_abs_fraction() -> f64 {
     1.0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum PipelineStep {
+    LogReturns { 
+        name: String, 
+        window: usize 
+    },
+    FitDistributions { 
+        name: String, 
+        input: String, 
+        families: Vec<DistFamilyConfig>, 
+        #[serde(default)]
+        test: TestKind 
+    },
+    Sample { 
+        name: String, 
+        input: String 
+    },
+    Aggregate { 
+        name: String, 
+        method: AggregationMethod, 
+        values: String, 
+        weights: Option<String> 
+    },
+    WolframEval {
+        name: String,
+        expr: String,
+        input: Option<String>,
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TestKind {
+    #[default]
+    Ks,
+    Ad,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregationMethod {
+    Mean,
+    WeightedMean,
+    Median,
+    Sum,
+    WeightedSum,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub enum DistFamilyConfig {
+    Normal,
+    StudentsT,
+    Laplace,
+    Logistic,
+    Cauchy,
 }
 
 fn default_min_trade_cash() -> f64 {

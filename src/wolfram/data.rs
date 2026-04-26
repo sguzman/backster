@@ -116,7 +116,7 @@ fn wl_string_lit(s: &str) -> String {
 
 fn math1_script_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("scripts")
+        .join("wls")
         .join("math1.wls")
 }
 
@@ -152,7 +152,7 @@ pub fn fetch_close_bars_with_rolling_fit(
     } else {
         let mut sess = WolframSession::connect(cfg.clone())?;
         sess.load_file(&math1_script_path())
-            .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+            .context("Failed to load wls/math1.wls into Wolfram kernel")?;
         let wl = format!(
             "BacksterFinancialDataCloseAndFitJSON[{},{},{},{},{}]",
             wl_string_lit(symbol),
@@ -277,7 +277,7 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         } else {
             let mut sess = WolframSession::connect(cfg.clone())?;
             sess.load_file(&math1_script_path())
-                .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+                .context("Failed to load wls/math1.wls into Wolfram kernel")?;
             let wl = format!("BacksterExprCloseAndFitJSON[{},{}]", wl_string_lit(expr), window);
             let json = sess.eval_to_string_expr(&wl)?;
             let json = unescape_wolfram_stringish(&json);
@@ -288,7 +288,7 @@ pub fn fetch_expr_close_bars_with_rolling_fit(
         // Never cache expressions that probably include randomness.
         let mut sess = WolframSession::connect(cfg.clone())?;
         sess.load_file(&math1_script_path())
-            .context("Failed to load scripts/math1.wls into Wolfram kernel")?;
+            .context("Failed to load wls/math1.wls into Wolfram kernel")?;
         let wl = format!("BacksterExprCloseAndFitJSON[{},{}]", wl_string_lit(expr), window);
         let json = sess.eval_to_string_expr(&wl)?;
         unescape_wolfram_stringish(&json)

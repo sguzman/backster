@@ -7,6 +7,7 @@ use crate::strategy::normal_noise::NormalNoiseInvestor;
 use crate::strategy::rolling_pvalue::RollingPvaluePredictor;
 use crate::strategy::adhoc_dist::AdHocDistributionPredictor;
 use crate::strategy::adhoc_normal::AdHocNormalPredictor;
+use crate::strategy::pipeline::FlexiblePipelinePredictor;
 use crate::wolfram::WolframSessionConfig;
 use crate::wolfram::data::fetch_close_bars_with_rolling_fit;
 use tracing::info;
@@ -15,7 +16,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
     let (bars, fits) = load_bars_and_features(cfg, data).context("Failed to load data/features")?;
 
     let mut strategy: Box<dyn Strategy> = match &cfg.strategy {
-        StrategyConfig::RollingPvaluePredictor {
+        &StrategyConfig::RollingPvaluePredictor {
             enter_threshold,
             exit_threshold,
             normalize_weights,
@@ -24,22 +25,22 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
         } => Box::new(RollingPvaluePredictor::new(
             cfg.window,
             cfg.holding_period_bars,
-            *enter_threshold,
-            *exit_threshold,
-            *normalize_weights,
-            *min_total_weight,
-            *force_trade_each_bar,
+            enter_threshold,
+            exit_threshold,
+            normalize_weights,
+            min_total_weight,
+            force_trade_each_bar,
             fits,
         )),
-        StrategyConfig::NormalNoiseInvestor {
+        &StrategyConfig::NormalNoiseInvestor {
             max_abs_fraction,
             min_trade_cash,
         } => Box::new(NormalNoiseInvestor::new(
-            *max_abs_fraction,
-            *min_trade_cash,
+            max_abs_fraction,
+            min_trade_cash,
             bars.len(),
         )?),
-        StrategyConfig::AdHocDistributionPredictor {
+        &StrategyConfig::AdHocDistributionPredictor {
             enter_threshold,
             exit_threshold,
             normalize_weights,
@@ -49,14 +50,14 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
         } => Box::new(AdHocDistributionPredictor::new(
             cfg.window,
             cfg.holding_period_bars,
-            *enter_threshold,
-            *exit_threshold,
-            *normalize_weights,
-            *min_total_weight,
-            *force_trade_each_bar,
-            *use_ad_test,
+            enter_threshold,
+            exit_threshold,
+            normalize_weights,
+            min_total_weight,
+            force_trade_each_bar,
+            use_ad_test,
         )),
-        StrategyConfig::AdHocNormalPredictor {
+        &StrategyConfig::AdHocNormalPredictor {
             enter_threshold,
             exit_threshold,
             normalize_weights,
@@ -66,12 +67,23 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
         } => Box::new(AdHocNormalPredictor::new(
             cfg.window,
             cfg.holding_period_bars,
-            *enter_threshold,
-            *exit_threshold,
-            *normalize_weights,
-            *min_total_weight,
-            *force_trade_each_bar,
-            *use_ad_test,
+            enter_threshold,
+            exit_threshold,
+            normalize_weights,
+            min_total_weight,
+            force_trade_each_bar,
+            use_ad_test,
+        )),
+        &StrategyConfig::FlexiblePipelinePredictor {
+            enter_threshold,
+            exit_threshold,
+            force_trade_each_bar,
+            ref pipeline,
+        } => Box::new(FlexiblePipelinePredictor::new(
+            enter_threshold,
+            exit_threshold,
+            force_trade_each_bar,
+            pipeline.clone(),
         )),
     };
 
@@ -130,8 +142,8 @@ fn load_bars_and_features(
             if let Some(k) = kernel {
                 kcfg.kernel = k.to_string();
             }
-            match cfg.strategy {
-                StrategyConfig::RollingPvaluePredictor { .. } => fetch_close_bars_with_rolling_fit(
+            match &cfg.strategy {
+                &StrategyConfig::RollingPvaluePredictor { .. } => fetch_close_bars_with_rolling_fit(
                     &kcfg,
                     symbol,
                     start,
@@ -140,9 +152,10 @@ fn load_bars_and_features(
                     resolution,
                     cfg.window,
                 ),
-                StrategyConfig::NormalNoiseInvestor { .. } | 
-                StrategyConfig::AdHocDistributionPredictor { .. } |
-                StrategyConfig::AdHocNormalPredictor { .. } => fetch_close_bars_with_rolling_fit(
+                &StrategyConfig::NormalNoiseInvestor { .. } | 
+                &StrategyConfig::AdHocDistributionPredictor { .. } |
+                &StrategyConfig::AdHocNormalPredictor { .. } |
+                &StrategyConfig::FlexiblePipelinePredictor { .. } => fetch_close_bars_with_rolling_fit(
                     &kcfg,
                     symbol,
                     start,
@@ -158,15 +171,14 @@ fn load_bars_and_features(
             if let Some(k) = kernel {
                 kcfg.kernel = k.to_string();
             }
-            match cfg.strategy {
-                StrategyConfig::RollingPvaluePredictor { .. } => crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(
-                    &kcfg,
-                    expr,
-                    cfg.window,
-                ),
-                StrategyConfig::NormalNoiseInvestor { .. } | 
-                StrategyConfig::AdHocDistributionPredictor { .. } |
-                StrategyConfig::AdHocNormalPredictor { .. } => {
+            match &cfg.strategy {
+                &StrategyConfig::RollingPvaluePredictor { .. } => {
+                    crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(&kcfg, expr, cfg.window)
+                }
+                &StrategyConfig::NormalNoiseInvestor { .. } | 
+                &StrategyConfig::AdHocDistributionPredictor { .. } |
+                &StrategyConfig::AdHocNormalPredictor { .. } |
+                &StrategyConfig::FlexiblePipelinePredictor { .. } => {
                     crate::wolfram::data::fetch_expr_close_bars_with_rolling_fit(&kcfg, expr, 0)
                 }
             }
