@@ -1,0 +1,53 @@
+# Linear Cash-Only Strategy Example
+# This strategy uses magnitude-based scaling but is restricted to available cash.
+# It will NOT use leverage or margin.
+
+mode = "backtest"
+
+[data]
+source = "wolfram_financial"
+symbol = "SP500"
+start = "2020-01-01"
+end = "2023-12-31"
+resolution = "day"
+field = "Close"
+
+[backtest]
+starting_cash = 100000.0
+allow_margin = false # Strictly cash-only
+window = 60
+holding_period_bars = 1
+log_bars = false
+log_trades = true
+
+[backtest.strategy]
+kind = "flexible_pipeline_predictor"
+execution_mode = "linear"
+enter_threshold = 0.0
+exit_threshold = 0.0
+force_trade_each_bar = true
+
+[[backtest.strategy.pipeline]]
+name = "returns"
+op = "log_returns"
+window = 60
+
+[[backtest.strategy.pipeline]]
+name = "fits"
+op = "fit_distributions"
+input = "returns"
+families = ["Normal", "StudentsT", "Laplace", "Logistic", "Cauchy"]
+test = "KS"
+
+[[backtest.strategy.pipeline]]
+name = "raw_signal"
+op = "aggregate"
+method = "weighted_sum"
+values = "fits"
+weights = "fits"
+
+[[backtest.strategy.pipeline]]
+name = "prediction"
+op = "scale"
+input = "raw_signal"
+factor = 500.0 
