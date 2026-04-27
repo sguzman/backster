@@ -21,30 +21,40 @@ fn main() -> anyhow::Result<()> {
     match cfg.mode {
         crate::config::Mode::Backtest => {
             let bt = cfg.backtest.ok_or_else(|| anyhow::anyhow!("Missing [backtest] config"))?;
+            let mut results = Vec::with_capacity(cli.n_times);
             for _ in 0..cli.n_times {
                 let pct = crate::modes::backtest::run_backtest(
                     &bt,
                     &cfg.data,
                     cli.quiet,
                 )?;
+                results.push(pct);
                 if cli.quiet {
                     println!("{pct:.6}%");
                 }
+            }
+            if cli.n_times > 1 {
+                crate::report::multi_run::report_stats(&results);
             }
         }
         crate::config::Mode::Optimize => {
             let opt = cfg
                 .optimizer
                 .ok_or_else(|| anyhow::anyhow!("Missing [optimizer] config"))?;
+            let mut results = Vec::with_capacity(cli.n_times);
             for _ in 0..cli.n_times {
                 let pct = crate::modes::optimize::run_optimize(
                     &opt,
                     &cfg.data,
                     cli.quiet,
                 )?;
+                results.push(pct);
                 if cli.quiet {
                     println!("{pct:.6}%");
                 }
+            }
+            if cli.n_times > 1 {
+                crate::report::multi_run::report_stats(&results);
             }
         }
     }
