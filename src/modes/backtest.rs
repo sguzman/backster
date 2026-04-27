@@ -75,11 +75,13 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
             use_ad_test,
         )),
         &StrategyConfig::FlexiblePipelinePredictor {
+            execution_mode,
             enter_threshold,
             exit_threshold,
             force_trade_each_bar,
             ref pipeline,
         } => Box::new(FlexiblePipelinePredictor::new(
+            execution_mode,
             enter_threshold,
             exit_threshold,
             force_trade_each_bar,
@@ -98,6 +100,7 @@ pub fn run_backtest(cfg: &BacktestConfig, data: &DataConfig, quiet: bool) -> Res
             log_trades: cfg.log_trades,
             log_strategy: cfg.log_bars,
             trade_resolution: cfg.trade_resolution.clone(),
+            allow_margin: cfg.allow_margin,
         },
     );
     let out = engine.run(&bars, strategy.as_mut())?;

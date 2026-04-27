@@ -6,13 +6,14 @@ use tracing::{info, warn};
 
 use crate::backtest::{BacktestContext, Bar, Side};
 use crate::strategy::Strategy;
-use crate::config::{PipelineStep, DistFamilyConfig, TestKind, AggregationMethod};
+use crate::config::{PipelineStep, DistFamilyConfig, TestKind, AggregationMethod, ExecutionMode};
 use crate::stats::ks::ks_p_value;
 use crate::stats::ad::ad_p_value;
 
 use rando::distrs::{NormalFit, StudentTFit, LaplaceFit, LogisticFit, CauchyFit, DistributionFit, FittedDistribution};
 
 pub struct FlexiblePipelinePredictor {
+    execution_mode: ExecutionMode,
     enter_threshold: f64,
     exit_threshold: f64,
     force_trade_each_bar: bool,
@@ -40,12 +41,14 @@ struct FitInfo {
 
 impl FlexiblePipelinePredictor {
     pub fn new(
+        execution_mode: ExecutionMode,
         enter_threshold: f64,
         exit_threshold: f64,
         force_trade_each_bar: bool,
         pipeline: Vec<PipelineStep>,
     ) -> Self {
         Self {
+            execution_mode,
             enter_threshold,
             exit_threshold,
             force_trade_each_bar,
@@ -159,6 +162,13 @@ impl FlexiblePipelinePredictor {
                 };
                 self.results.insert(name.clone(), StepData::Scalar(res));
             }
+            PipelineStep::Scale { name, input, factor } => {
+                let val = match self.results.get(input) {
+                    Some(StepData::Scalar(s)) => *s,
+                    _ => return Ok(()),
+                };
+                self.results.insert(name.clone(), StepData::Scalar(val * factor));
+            }
             PipelineStep::WolframEval { .. } => {
                 warn!("WolframEval step not yet implemented in FlexiblePipelinePredictor");
             }
@@ -210,33 +220,70 @@ impl Strategy for FlexiblePipelinePredictor {
         };
 
         // Trading logic
-        let trade_qty = (ctx.cash / bar.close).floor();
-
-        if self.force_trade_each_bar {
-            if ctx.position.is_some() {
-                ctx.exit(bar.close, bar.ts)?;
-            }
-            if trade_qty > 0.0 {
-                if predicted_lr > self.enter_threshold {
-                    ctx.enter_long(trade_qty, bar.close, bar.ts)?;
-                } else if predicted_lr < -self.enter_threshold {
-                    ctx.enter_short(trade_qty, bar.close, bar.ts)?;
-                }
-            }
-        } else {
-            if ctx.position.is_none() {
-                if trade_qty > 0.0 {
-                    if predicted_lr > self.enter_threshold {
-                        ctx.enter_long(trade_qty, bar.close, bar.ts)?;
-                    } else if predicted_lr < -self.enter_threshold {
-                        ctx.enter_short(trade_qty, bar.close, bar.ts)?;
+        match self.execution_mode {
+            ExecutionMode::Threshold => {
+                let trade_qty = (ctx.cash / bar.close).floor();
+                if self.force_trade_each_bar {
+                    if ctx.position.is_some() {
+                        ctx.exit(bar.close, bar.ts)?;
+                    }
+                    if trade_qty > 0.0 {
+                        if predicted_lr > self.enter_threshold {
+                            ctx.enter_long(trade_qty, bar.close, bar.ts)?;
+                        } else if predicted_lr < -self.enter_threshold {
+                            ctx.enter_short(trade_qty, bar.close, bar.ts)?;
+                        }
+                    }
+                } else {
+                    if ctx.position.is_none() {
+                        if trade_qty > 0.0 {
+                            if predicted_lr > self.enter_threshold {
+                                ctx.enter_long(trade_qty, bar.close, bar.ts)?;
+                            } else if predicted_lr < -self.enter_threshold {
+                                ctx.enter_short(trade_qty, bar.close, bar.ts)?;
+                            }
+                        }
+                    } else {
+                        let pos_side = ctx.position.as_ref().unwrap().side;
+                        if (pos_side == Side::Long && predicted_lr < self.exit_threshold) ||
+                           (pos_side == Side::Short && predicted_lr > -self.exit_threshold) {
+                            ctx.exit(bar.close, bar.ts)?;
+                        }
                     }
                 }
-            } else {
-                let pos_side = ctx.position.as_ref().unwrap().side;
-                if (pos_side == Side::Long && predicted_lr < self.exit_threshold) ||
-                   (pos_side == Side::Short && predicted_lr > -self.exit_threshold) {
+            }
+            ExecutionMode::Linear => {
+                // Exit previous position first (daily reset as described by user)
+                if ctx.position.is_some() {
                     ctx.exit(bar.close, bar.ts)?;
+                }
+
+                let equity = ctx.equity(bar.close);
+                let target_value = predicted_lr * equity;
+                let target_qty = (target_value.abs() / bar.close).floor();
+
+                if target_qty > 0.0 {
+                    if predicted_lr > 0.0 {
+                        let final_qty = if ctx.allow_margin() {
+                            target_qty
+                        } else {
+                            let max_qty = (ctx.cash / bar.close).floor();
+                            target_qty.min(max_qty)
+                        };
+                        if final_qty > 0.0 {
+                            ctx.enter_long(final_qty, bar.close, bar.ts)?;
+                        }
+                    } else if predicted_lr < 0.0 {
+                        let final_qty = if ctx.allow_margin() {
+                            target_qty
+                        } else {
+                            let max_qty = (ctx.cash / bar.close).floor();
+                            target_qty.min(max_qty)
+                        };
+                        if final_qty > 0.0 {
+                            ctx.enter_short(final_qty, bar.close, bar.ts)?;
+                        }
+                    }
                 }
             }
         }

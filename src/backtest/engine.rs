@@ -43,6 +43,7 @@ pub struct BacktestContext {
     log_trades: bool,
     log_strategy: bool,
     trade_resolution: String,
+    allow_margin: bool,
     rng: rand_chacha::ChaCha8Rng,
 }
 
@@ -56,14 +57,16 @@ impl BacktestContext {
             log_trades: false,
             log_strategy: false,
             trade_resolution: "bar".to_string(),
+            allow_margin: false,
             rng: rand_chacha::ChaCha8Rng::seed_from_u64(seed),
         }
     }
 
-    pub fn set_logging(&mut self, log_trades: bool, log_strategy: bool, trade_resolution: String) {
+    pub fn set_logging(&mut self, log_trades: bool, log_strategy: bool, trade_resolution: String, allow_margin: bool) {
         self.log_trades = log_trades;
         self.log_strategy = log_strategy;
         self.trade_resolution = trade_resolution;
+        self.allow_margin = allow_margin;
     }
 
     pub fn rng(&mut self) -> &mut rand_chacha::ChaCha8Rng {
@@ -74,12 +77,18 @@ impl BacktestContext {
         self.log_strategy
     }
 
+    pub fn allow_margin(&self) -> bool {
+        self.allow_margin
+    }
+
     pub fn enter_long(&mut self, qty: f64, price: f64, ts: DateTime<Utc>) -> Result<()> {
         anyhow::ensure!(self.position.is_none(), "Already in a position");
         anyhow::ensure!(qty.is_finite() && qty > 0.0, "Invalid qty");
         anyhow::ensure!(price.is_finite() && price > 0.0, "Invalid price");
         let cost = qty * price;
-        anyhow::ensure!(self.cash + 1e-9 >= cost, "Insufficient cash");
+        if !self.allow_margin {
+            anyhow::ensure!(self.cash + 1e-9 >= cost, "Insufficient cash");
+        }
         self.cash -= cost;
         self.position = Some(Position {
             side: Side::Long,
@@ -106,7 +115,9 @@ impl BacktestContext {
         anyhow::ensure!(qty.is_finite() && qty > 0.0, "Invalid qty");
         anyhow::ensure!(price.is_finite() && price > 0.0, "Invalid price");
         let collateral = qty * price;
-        anyhow::ensure!(self.cash + 1e-9 >= collateral, "Insufficient cash (short collateral)");
+        if !self.allow_margin {
+            anyhow::ensure!(self.cash + 1e-9 >= collateral, "Insufficient cash (short collateral)");
+        }
         self.cash -= collateral;
         self.position = Some(Position {
             side: Side::Short,
@@ -194,6 +205,7 @@ impl BacktestEngine {
             self.log.log_trades,
             self.log.log_strategy,
             self.log.trade_resolution.clone(),
+            self.log.allow_margin,
         );
         strategy.on_start(&mut ctx)?;
 
@@ -236,4 +248,5 @@ pub struct BacktestLogConfig {
     pub log_trades: bool,
     pub log_strategy: bool,
     pub trade_resolution: String,
+    pub allow_margin: bool,
 }

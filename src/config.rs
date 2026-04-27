@@ -53,6 +53,8 @@ fn default_resolution() -> String {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BacktestConfig {
     pub starting_cash: f64,
+    #[serde(default)]
+    pub allow_margin: bool,
     pub window: usize,
     #[serde(default = "default_trade_resolution")]
     pub trade_resolution: String,
@@ -131,6 +133,8 @@ pub enum StrategyConfig {
         use_ad_test: bool,
     },
     FlexiblePipelinePredictor {
+        #[serde(default)]
+        execution_mode: ExecutionMode,
         enter_threshold: f64,
         exit_threshold: f64,
         #[serde(default)]
@@ -171,6 +175,11 @@ pub enum PipelineStep {
         values: String, 
         weights: Option<String> 
     },
+    Scale {
+        name: String,
+        input: String,
+        factor: f64,
+    },
     WolframEval {
         name: String,
         expr: String,
@@ -186,7 +195,20 @@ pub enum TestKind {
     Ad,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    Threshold,
+    Linear,
+}
+
+impl Default for ExecutionMode {
+    fn default() -> Self {
+        Self::Threshold
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AggregationMethod {
     Mean,
