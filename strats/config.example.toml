@@ -1,43 +1,45 @@
+# Backster Strategy Configuration Example
+# Demonstrates the Flexible Pipeline Predictor
+
 mode = "backtest"
 
 [data]
 source = "wolfram_financial"
 symbol = "AAPL"
-start = "2020-01-01"
-end = "2021-01-01"
+start = "2022-01-01"
+end = "2023-01-01"
 field = "Close"
 resolution = "day"
 
 [backtest]
 starting_cash = 100000.0
-window = 126
-trade_resolution = "bar"
+window = 30  # Data fetching window
 holding_period_bars = 1
 log_bars = true
 log_trades = true
 
 [backtest.strategy]
-kind = "rolling_pvalue_predictor"
-enter_threshold = 0.001
+kind = "flexible_pipeline_predictor"
+enter_threshold = 0.0005
 exit_threshold = 0.0
-normalize_weights = true
-min_total_weight = 0.0
 force_trade_each_bar = true
 
-# --- optimizer example ---
-#
-# mode = "optimize"
-#
-# [optimizer]
-# starting_cash = 100000.0
-# max_trades = 10
-# know_future = true
-# allow_long = true
-# allow_short = false
-#
-# [data]
-# source = "wolfram_financial"
-# symbol = "AAPL"
-# start = "2020-01-01"
-# end = "2021-01-01"
-# field = "Close"
+# The pipeline defines the daily computation steps
+[[backtest.strategy.pipeline]]
+name = "my_returns"
+op = "log_returns"
+window = 30  # Sliding window for returns
+
+[[backtest.strategy.pipeline]]
+name = "my_fits"
+op = "fit_distributions"
+input = "my_returns"
+families = ["Normal", "StudentsT"]
+test = "KS"
+
+[[backtest.strategy.pipeline]]
+name = "prediction" # The final step MUST be named "prediction"
+op = "aggregate"
+method = "weighted_sum" # Sum(sample_i * p_value_i)
+values = "my_fits"
+weights = "my_fits"

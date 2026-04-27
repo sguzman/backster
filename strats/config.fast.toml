@@ -1,18 +1,41 @@
 mode = "backtest"
 
 [data]
-source = "wolfram_expr"
-expr = "TimeSeries[Table[{DatePlus[DateObject[{2020, 1, 1}], i], 100.0 + 0.1 i + Sin[i/3.0]}, {i, 0, 40}]]"
+source = "wolfram_financial"
+symbol = "SP500"
+start = "2022-01-01"
+end = "2023-01-01"
+field = "Close"
+resolution = "day"
 
 [backtest]
 starting_cash = 100000.0
-window = 10
-trade_resolution = "day"
+window = 20
+holding_period_bars = 1
+log_bars = false
+log_trades = false
 
 [backtest.strategy]
-kind = "rolling_pvalue_predictor"
-enter_threshold = 0.001
+kind = "flexible_pipeline_predictor"
+enter_threshold = 0.0001
 exit_threshold = 0.0
-normalize_weights = true
-min_total_weight = 0.0
 force_trade_each_bar = true
+
+[[backtest.strategy.pipeline]]
+name = "returns"
+op = "log_returns"
+window = 20
+
+[[backtest.strategy.pipeline]]
+name = "fits"
+op = "fit_distributions"
+input = "returns"
+families = ["Normal"]
+test = "KS"
+
+[[backtest.strategy.pipeline]]
+name = "prediction"
+op = "aggregate"
+method = "weighted_sum"
+values = "fits"
+weights = "fits"
