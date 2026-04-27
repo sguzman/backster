@@ -8,6 +8,9 @@ pub mod pipeline;
 
 pub trait Strategy {
     fn name(&self) -> &'static str;
+    fn on_data(&mut self, _bars: &[Bar]) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn on_start(&mut self, _ctx: &mut BacktestContext) -> anyhow::Result<()> {
         Ok(())
     }

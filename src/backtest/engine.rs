@@ -200,6 +200,7 @@ impl BacktestEngine {
             rng.try_fill_bytes(&mut bytes).expect("OsRng failed");
             u64::from_le_bytes(bytes)
         };
+        strategy.on_data(bars)?;
         let mut ctx = BacktestContext::new(self.starting_cash, seed);
         ctx.set_logging(
             self.log.log_trades,

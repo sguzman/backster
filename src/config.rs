@@ -184,6 +184,15 @@ pub enum PipelineStep {
         name: String,
         expr: String,
         input: Option<String>,
+    },
+    Lookahead {
+        name: String,
+        input: String,
+        shift: isize,
+    },
+    Sign {
+        name: String,
+        input: String,
     }
 }
 

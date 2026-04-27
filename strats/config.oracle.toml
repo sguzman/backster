@@ -1,0 +1,40 @@
+# Oracle Strategy Example (Perfect Information)
+# This strategy "cheats" by looking at the next day's return.
+# It bets 100% of available equity in the correct direction.
+
+mode = "backtest"
+
+[data]
+source = "wolfram_financial"
+symbol = "SP500"
+start = "2020-01-01"
+end = "2023-12-31"
+resolution = "day"
+field = "Close"
+
+[backtest]
+starting_cash = 100000.0 
+allow_margin = true
+window = 1
+holding_period_bars = 1
+log_bars = false
+log_trades = true
+
+[backtest.strategy]
+kind = "flexible_pipeline_predictor"
+execution_mode = "linear"
+enter_threshold = 0.0
+exit_threshold = 0.0
+force_trade_each_bar = true
+
+# The pipeline extracts the "future" return and takes its sign.
+[[backtest.strategy.pipeline]]
+name = "next_day_return"
+op = "lookahead"
+input = "market_return"
+shift = 1
+
+[[backtest.strategy.pipeline]]
+name = "prediction"
+op = "sign"
+input = "next_day_return"

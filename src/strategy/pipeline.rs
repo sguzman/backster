@@ -18,6 +18,8 @@ pub struct FlexiblePipelinePredictor {
     exit_threshold: f64,
     force_trade_each_bar: bool,
     pipeline: Vec<PipelineStep>,
+    bars: Vec<Bar>,
+    current_index: usize,
 
     results: HashMap<String, StepData>,
     last_close: Option<f64>,
@@ -53,6 +55,8 @@ impl FlexiblePipelinePredictor {
             exit_threshold,
             force_trade_each_bar,
             pipeline,
+            bars: Vec::new(),
+            current_index: 0,
             results: HashMap::new(),
             last_close: None,
             rng: ChaCha8Rng::seed_from_u64(42),
@@ -169,6 +173,36 @@ impl FlexiblePipelinePredictor {
                 };
                 self.results.insert(name.clone(), StepData::Scalar(val * factor));
             }
+            PipelineStep::Lookahead { name, input, shift } => {
+                // This is a bit tricky because we might need to calculate the input for a future index.
+                // However, if we just want an oracle, we can look ahead at the returns.
+                // For simplicity, we'll only allow Lookahead on scalars for now.
+                // To actually look ahead, we'd need to evaluate the whole pipeline for that index.
+                
+                // Special case: if input is "market_return", we look ahead at self.bars
+                if input == "market_return" {
+                    let idx = (self.current_index as isize + shift) as usize;
+                    if idx < self.bars.len() && idx > 0 {
+                        let curr = self.bars[idx].close;
+                        let prev = self.bars[idx-1].close;
+                        let ret = (curr / prev).ln();
+                        self.results.insert(name.clone(), StepData::Scalar(ret));
+                    } else {
+                        self.results.insert(name.clone(), StepData::Scalar(0.0));
+                    }
+                } else {
+                    // General case: Not yet fully supported for arbitrary pipeline steps
+                    warn!("Lookahead only supported for 'market_return' currently");
+                }
+            }
+            PipelineStep::Sign { name, input } => {
+                let val = match self.results.get(input) {
+                    Some(StepData::Scalar(s)) => *s,
+                    _ => return Ok(()),
+                };
+                let res = if val > 0.0 { 1.0 } else if val < 0.0 { -1.0 } else { 0.0 };
+                self.results.insert(name.clone(), StepData::Scalar(res));
+            }
             PipelineStep::WolframEval { .. } => {
                 warn!("WolframEval step not yet implemented in FlexiblePipelinePredictor");
             }
@@ -198,6 +232,11 @@ impl Strategy for FlexiblePipelinePredictor {
         "FlexiblePipelinePredictor"
     }
 
+    fn on_data(&mut self, bars: &[Bar]) -> Result<()> {
+        self.bars = bars.to_vec();
+        Ok(())
+    }
+
     fn on_start(&mut self, ctx: &mut BacktestContext) -> Result<()> {
         self.rng = ChaCha8Rng::seed_from_u64(ctx.seed);
         self.results.clear();
@@ -206,6 +245,16 @@ impl Strategy for FlexiblePipelinePredictor {
     }
 
     fn on_bar(&mut self, ctx: &mut BacktestContext, bar: &Bar) -> Result<()> {
+        // Find current index if not tracked (fallback)
+        if self.bars.is_empty() {
+             // should not happen with on_data
+        } else {
+            // Update index based on timestamp match
+            if let Some(pos) = self.bars.iter().position(|b| b.ts == bar.ts) {
+                self.current_index = pos;
+            }
+        }
+
         let steps = self.pipeline.clone();
         for step in &steps {
             self.run_step(step, bar)?;
